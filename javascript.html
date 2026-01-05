@@ -1,0 +1,2156 @@
+<script>
+// ========== Global Variables ==========
+var currentUser = null;
+var lessonsData = [];
+var userScores = {};
+var userHistory = [];
+
+function convertGoogleDriveToDirectUrl(url) {
+  if (!url) return "";
+  
+  var fileId = null;
+  var match1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (match1) fileId = match1[1];
+  else {
+      var match2 = url.match(/id=([a-zA-Z0-9_-]+)/);
+      if (match2) fileId = match2[1];
+  }
+
+  if (fileId) {
+    return 'https://docs.google.com/uc?export=download&confirm=t&id=' + fileId;
+  }
+  
+  return url;
+}
+
+// ========== Document Ready ==========
+$(document).ready(function(){
+  // Fix Bootstrap Modal focus issue with Summernote
+  $.fn.modal.Constructor.prototype.enforceFocus = function() {};
+  
+  // Summernote Audio Button
+  var summernoteAudioButton = function(context) {
+    var ui = $.summernote.ui;
+    var button = ui.button({
+      contents: '<i class="fas fa-music"></i>',
+      tooltip: 'แทรกไฟล์เสียง (URL)',
+      click: function() {
+        $('#audioInsertModal').remove();
+        var dialogHtml = '<div class="modal fade" id="audioInsertModal" tabindex="-1" style="z-index: 1055;">' +
+          '<div class="modal-dialog modal-dialog-centered">' +
+            '<div class="modal-content">' +
+              '<div class="modal-header bg-info text-white">' +
+                '<h5 class="modal-title"><i class="fas fa-music me-2"></i>แทรกไฟล์เสียง</h5>' +
+                '<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>' +
+              '</div>' +
+              '<div class="modal-body">' +
+                '<div class="mb-3">' +
+                  '<label for="audioUrlInput" class="form-label">กรุณาวางลิงก์ไฟล์เสียง (mp3, wav)</label>' +
+                  '<input type="text" class="form-control" id="audioUrlInput" placeholder="https://drive.google.com/file/d/.../view" autocomplete="off">' +
+                '</div>' +
+              '</div>' +
+              '<div class="modal-footer">' +
+                '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>' +
+                '<button type="button" class="btn btn-primary" id="insertAudioBtn">ตกลง</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+        $('body').append(dialogHtml);
+        var myModal = new bootstrap.Modal(document.getElementById('audioInsertModal'));
+        myModal.show();
+        $('#insertAudioBtn').click(function() {
+          var audioUrl = $('#audioUrlInput').val().trim();
+          if (audioUrl) {
+            var directUrl = convertGoogleDriveToDirectUrl(audioUrl);
+            var audioHtml = '<audio controls style="width: 100%; max-width: 400px;"><source src="' + directUrl + '" type="audio/mpeg"></audio><br>';
+            context.invoke('editor.pasteHTML', audioHtml);
+            myModal.hide();
+          }
+        });
+      }
+    });
+    return button.render();
+  };
+
+  // Init Summernote for Content
+  $('#summernote').summernote({
+    placeholder: 'พิมพ์เนื้อหาบทเรียน...',
+    tabsize: 2,
+    height: 300,
+    toolbar: [
+      ['style', ['style']],
+      ['font', ['bold', 'underline', 'clear', 'color']],
+      ['para', ['ul', 'ol', 'paragraph']],
+      ['table', ['table']],
+      ['insert', ['link', 'picture', 'video', 'audio', 'quiz']],
+      ['view', ['codeview', 'help']]
+    ],
+    buttons: {
+      audio: summernoteAudioButton,
+      quiz: function(context) {
+        var ui = $.summernote.ui;
+        return ui.button({
+          contents: '<i class="fas fa-question-circle text-danger"></i>',
+          tooltip: 'แทรกแบบฝึกหัดระหว่างเรียน',
+          click: function() {
+            insertEmbeddedQuiz(context);
+          }
+        }).render();
+      }
+    }
+  });
+
+  // Init Summernote for Exam
+  $('#examSummernote').summernote({
+    placeholder: 'พิมพ์โจทย์คำถาม...',
+    tabsize: 2,
+    height: 150,
+    toolbar: [
+      ['style', ['style']],
+      ['font', ['bold', 'italic', 'underline', 'clear', 'color']],
+      ['para', ['ul', 'ol', 'paragraph']],
+      ['table', ['table']],
+      ['insert', ['link', 'picture', 'video', 'audio']],
+      ['view', ['codeview', 'help']]
+    ],
+    buttons: { audio: summernoteAudioButton }
+  });
+
+  // Exam Type Selector
+  $('#examTypeSelector').change(function(){
+    var type = $(this).val();
+    $('.exam-option-group').hide();
+    $('input[name="correct_idx"]').prop('required', false);
+    if(type === 'mcq'){ $('#area_mcq').show(); $('input[name="correct_idx"]').prop('required', true); }
+    else if(type === 'tf') { $('#area_tf').show(); }
+    else if(type === 'short') { $('#area_short').show(); }
+    else if(type === 'dropdown') { $('#area_dropdown').show(); }
+    else if(type === 'matching') { $('#area_matching').show(); }
+  }).trigger('change');
+
+  // Check Session
+  var storedUser = localStorage.getItem('userSession');
+  if(storedUser){
+    try {
+      currentUser = JSON.parse(storedUser);
+      loginSuccess(false);
+    } catch (e) {
+      console.error("Invalid stored session:", e);
+      localStorage.removeItem('userSession');
+      renderGuestMenu();
+    }
+  } else {
+    renderGuestMenu();
+  }
+
+  // Login Form Handler
+  $('#formLogin').submit(function(e){
+    e.preventDefault();
+    var user = $('#login_user').val();
+    var pass = $('#login_pass').val();
+    Swal.fire({title: 'กำลังตรวจสอบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+    google.script.run.withSuccessHandler(function(userObj){
+      Swal.close();
+      if(userObj.status === true){
+        currentUser = userObj;
+        $('#loginModal').modal('hide');
+        loginSuccess(true);
+      } else {
+        Swal.fire('Login Failed', userObj.msg, 'error');
+      }
+    }).withFailureHandler(function(err){
+      Swal.close();
+      Swal.fire('Error', 'เกิดข้อผิดพลาด: ' + err.message, 'error');
+    }).loginUser(user, pass);
+  });
+
+  // Register Form Handler
+  $('#formReg').submit(function(e){
+    e.preventDefault();
+    var editId = $('#edit_id_user').val();
+    var formData = {
+      reg_prefix: $('#reg_prefix').val(),
+      reg_fname: $('#reg_fname').val(),
+      reg_lname: $('#reg_lname').val(),
+      reg_user: $('#reg_user').val(),
+      reg_pass: $('#reg_pass').val(),
+      reg_status: $('#reg_status').val(),
+      edit_id: editId
+    };
+    Swal.fire({title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+    if (editId) {
+      google.script.run.withSuccessHandler(function(res){
+        Swal.close();
+        if(res.status === true || res.status === 'ok'){
+          $('#regModal').modal('hide');
+          Swal.fire('Success', 'แก้ไขข้อมูลเรียบร้อย', 'success');
+          $('#formReg')[0].reset();
+          if(typeof loadAdminTables === 'function') loadAdminTables();
+        } else {
+          Swal.fire('Error', res.msg, 'error');
+        }
+      }).updateData('user', formData);
+    } else {
+      google.script.run.withSuccessHandler(function(res){
+        Swal.close();
+        if(res.status === true || res.status === 'ok'){
+          $('#regModal').modal('hide');
+          if(currentUser && currentUser.role === 'admin'){
+            Swal.fire('Success', 'เพิ่มผู้ใช้ใหม่เรียบร้อย', 'success');
+            if(typeof loadAdminTables === 'function') loadAdminTables();
+          } else {
+            Swal.fire('Success', 'สมัครสมาชิกเรียบร้อยแล้ว กรุณาเข้าสู่ระบบ', 'success');
+          }
+          $('#formReg')[0].reset();
+        } else {
+          Swal.fire('Failed', res.msg, 'error');
+        }
+      }).registerUser(formData);
+    }
+  });
+
+  // Exam Form Handler
+  $('#formExam').submit(function(e){
+    e.preventDefault();
+    var editId = $('#edit_id_exam').val();
+    var formData = {};
+    
+    // 1. ดึงข้อมูลจาก Input ธรรมดา
+    $(this).serializeArray().forEach(function(item) {
+      formData[item.name] = item.value;
+    });
+    
+    // 2. ดึงโจทย์จาก Summernote
+    formData.exam_question = $('#examSummernote').summernote('code');
+    if(!formData.exam_question || formData.exam_question === '<p><br></p>') {
+      Swal.fire('Warning', 'กรุณากรอกโจทย์คำถาม', 'warning');
+      return;
+    }
+
+    // 3. ประมวลผล Choices และ Answer ตามประเภทข้อสอบ
+    var type = $('#examTypeSelector').val();
+    var choices = "";
+    var answer = "";
+
+    if (type === 'mcq') {
+      var arr = [];
+      for(var i=1; i<=4; i++) arr.push(formData['choice_' + i] || '');
+      choices = arr.join('|');
+      var idx = formData.correct_idx;
+      if(!idx) { Swal.fire('Warning', 'กรุณาเลือกข้อที่ถูก', 'warning'); return; }
+      answer = formData['choice_' + idx];
+
+    } else if (type === 'tf') {
+      choices = "True|False";
+      answer = $('#tfAnswerSelect').val();
+
+    } else if (type === 'short') {
+      choices = "";
+      answer = $('#shortAnswerInput').val();
+      if(!answer) { Swal.fire('Warning', 'กรุณากรอกเฉลยคำตอบ', 'warning'); return; }
+
+    } else if (type === 'dropdown') {
+      var correct = $('#ddAnswerInput').val();
+      var d1 = $('#dd_distractor_1').val();
+      var d2 = $('#dd_distractor_2').val();
+      var d3 = $('#dd_distractor_3').val();
+      if(!correct) { Swal.fire('Warning', 'กรุณากรอกเฉลยคำตอบ', 'warning'); return; }
+      // เอาคำตอบถูกมารวมกับตัวลวง
+      var ddArr = [correct, d1, d2, d3].filter(function(x) { return x; });
+      choices = ddArr.join('|');
+      answer = correct;
+
+    } else if (type === 'matching') {
+      var pairs = [];
+      $('.matching-left').each(function(i){
+        var l = $(this).val();
+        var r = $('.matching-right').eq(i).val();
+        if(l && r) pairs.push(l + ':' + r);
+      });
+      if(pairs.length < 2) { Swal.fire('Warning', 'กรุณาระบุอย่างน้อย 2 คู่', 'warning'); return; }
+      choices = pairs.join('|');
+      // สำหรับ Matching เอา choices ไปเก็บใน answer ด้วย (หรือจะเก็บค่าอื่นก็ได้ แต่ต้องไม่ว่าง)
+      answer = choices; 
+    }
+
+    // 4. บันทึกค่าที่ประมวลผลแล้วลง Object formData
+    formData.choices = choices;
+    
+    // *** จุดที่แก้ไข: ต้องใช้ชื่อ exam_answer เพื่อให้ตรงกับ Code.gs ***
+    formData.exam_answer = answer; 
+    
+    formData.edit_id = editId;
+
+    Swal.fire({title: 'กำลังบันทึกข้อสอบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+
+    // 5. ส่งข้อมูลไป Server
+    if (editId) {
+      // กรณีแก้ไข
+      google.script.run.withSuccessHandler(function(res){
+        Swal.close();
+        if(res.status === true || res.status === 'ok'){
+          $('#examModal').modal('hide');
+          Swal.fire('Success', 'แก้ไขข้อสอบเรียบร้อย', 'success');
+          $('#formExam')[0].reset();
+          $('#examSummernote').summernote('code', '');
+          if(typeof loadAdminTables === 'function') loadAdminTables();
+        } else { Swal.fire('Failed', res.msg, 'error'); }
+      }).updateData('exam', formData);
+
+    } else {
+      // กรณีสร้างใหม่
+      google.script.run.withSuccessHandler(function(res){
+        Swal.close();
+        if(res.status === true || res.status === 'ok'){
+          $('#examModal').modal('hide');
+          Swal.fire('Success', 'บันทึกข้อสอบเรียบร้อย', 'success');
+          $('#formExam')[0].reset();
+          $('#examSummernote').summernote('code', '');
+          // รีโหลดข้อมูลบทเรียนและตาราง Admin ทันที
+          loadLessons();
+          if(typeof loadAdminTables === 'function') loadAdminTables();
+        } else { Swal.fire('Failed', res.message || res.msg, 'error'); }
+      }).saveExamQuestion(formData);
+    }
+  });
+
+  // Content Form Handler
+  $('#formContent').submit(function(e){
+    e.preventDefault();
+    var editId = $('#edit_id_lesson').val();
+    var formData = {};
+    $(this).serializeArray().forEach(function(item) {
+      formData[item.name] = item.value;
+    });
+    formData.content_desc = $('#summernote').summernote('code');
+    formData.edit_id = editId;
+    var file = $('#fileUpload')[0].files[0];
+    Swal.fire({title: 'กำลังบันทึกเนื้อหา...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+    if (editId) {
+      google.script.run.withSuccessHandler(function(res){
+        Swal.close();
+        if(res.status === 'ok' || res.status === true){
+          $('#contentModal').modal('hide');
+          Swal.fire('Success', 'แก้ไขข้อมูลเรียบร้อย', 'success');
+          $('#formContent')[0].reset();
+          $('#summernote').summernote('code', '');
+          loadLessons();
+          if(typeof loadAdminTables === 'function') loadAdminTables();
+        } else {
+          Swal.fire('Failed', res.message || res.msg, 'error');
+        }
+      }).updateData('lesson', formData);
+    } else {
+      function handleCreateResponse(res) {
+        Swal.close();
+        if(res.status === 'ok'){
+          $('#contentModal').modal('hide');
+          Swal.fire('Success', 'บันทึกเนื้อหาเรียบร้อย', 'success');
+          $('#formContent')[0].reset();
+          $('#summernote').summernote('code', '');
+          loadLessons();
+          if(typeof loadAdminTables === 'function') loadAdminTables();
+        } else {
+          Swal.fire('Failed', res.message, 'error');
+        }
+      }
+      if (file) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          var base64File = e.target.result.split(',')[1];
+          google.script.run.withSuccessHandler(handleCreateResponse)
+            .saveContentWithFile(formData, base64File, file.name, file.type);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        google.script.run.withSuccessHandler(handleCreateResponse).saveContent(formData);
+      }
+    }
+  });
+
+  // Cert Settings Form
+  $('#formCertSet').submit(function(e){
+    e.preventDefault();
+    var num = $('#certStartNum').val();
+    Swal.fire({title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+    google.script.run.withSuccessHandler(function(res){
+      Swal.close();
+      if(res.status === 'ok'){
+        $('#certSettingsModal').modal('hide');
+        Swal.fire('Success', 'บันทึกเลขที่เกียรติบัตรเริ่มต้นเรียบร้อย', 'success');
+      } else {
+        Swal.fire('Failed', res.message, 'error');
+      }
+    }).setCertNumber(num);
+  });
+
+  // Finish Lesson Button
+  $(document).on('click', '#btnFinishLesson', function() {
+    var lessonId = $(this).data('lesson-id');
+    if(lessonId) {
+      markComplete(lessonId);
+    } else {
+      Swal.fire('Error', 'ไม่พบรหัสบทเรียน', 'error');
+    }
+  });
+
+  // Modal Reset Events
+  $('button[data-bs-target="#examModal"]').click(function(){
+    $('#formExam')[0].reset();
+    $('#edit_id_exam').val('');
+    $('#examSummernote').summernote('code', '');
+    $('#examModal .modal-title').text('สร้างข้อสอบ');
+    $('.matching-left, .matching-right').val('');
+  });
+
+  $('button[data-bs-target="#contentModal"]').click(function(){
+    $('#formContent')[0].reset();
+    $('#summernote').summernote('code', '');
+    $('#edit_id_lesson').val('');
+    $('#contentModal .modal-title').text('สร้างเนื้อหา');
+  });
+
+  $('button[data-bs-target="#regModal"]').click(function(){
+    $('#formReg')[0].reset();
+    $('#edit_id_user').val('');
+    $('#regModal .modal-title').html('<i class="fas fa-user-plus"></i> ลงทะเบียน');
+  });
+
+  // Load Initial Data
+  loadUnitDropdowns();
+  loadPublicCertTable();
+});
+
+// ========== Guest Menu ==========
+function renderGuestMenu() {
+  var html = '<li class="nav-item me-2">' +
+    '<button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#loginModal">Sign in</button>' +
+  '</li>' +
+  '<li class="nav-item">' +
+    '<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#regModal">Register</button>' +
+  '</li>';
+  $('#authMenu').html(html);
+  $('#guestLandingPage').show();
+  $('#guestDashboard').show();
+  $('#mainAppSection').hide();
+  
+  // Load Visitor Stats
+  $('#cnt_daily').text('-');
+  $('#cnt_month').text('-');
+  $('#cnt_total').text('-');
+  google.script.run.withSuccessHandler(function(stats){
+    if(stats) {
+      $('#cnt_daily').text(stats.daily ? stats.daily.toLocaleString() : '0');
+      $('#cnt_month').text(stats.monthly ? stats.monthly.toLocaleString() : '0');
+      $('#cnt_total').text(stats.total ? stats.total.toLocaleString() : '0');
+    }
+  }).withFailureHandler(function(err){
+    console.error('Error loading visitor stats:', err);
+    $('#cnt_daily').text('0');
+    $('#cnt_month').text('0');
+    $('#cnt_total').text('0');
+  }).getVisitorStats();
+}
+
+// ========== Login Success ==========
+function loginSuccess(saveToLocal){
+  if(saveToLocal){
+    localStorage.setItem('userSession', JSON.stringify(currentUser));
+  }
+  var html = '<li class="nav-item me-3 text-dark fw-bold pt-2">' +
+    '<i class="fas fa-user-circle text-primary"></i> ' + currentUser.name + ' <span class="badge bg-secondary">' + currentUser.role + '</span>' +
+  '</li>' +
+  '<li class="nav-item">' +
+    '<button type="button" class="btn btn-danger btn-sm mt-1" onclick="logout()"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</button>' +
+  '</li>';
+  $('#authMenu').html(html);
+  $('#guestLandingPage').hide();
+  $('#guestDashboard').hide();
+  $('#mainAppSection').fadeIn();
+  if(currentUser.role === 'admin'){
+    $('#adminPanel').slideDown();
+    $('#dashboardSection').hide();
+    $('#studentSidebarArea').show();
+    $('#studentContentArea').show();
+    $('#adminContentArea').fadeIn();
+    loadAdminTables();
+    loadLessons();
+  } else {
+    $('#adminPanel').hide();
+    $('#adminContentArea').hide();
+    $('#dashboardSection').fadeIn();
+    $('#studentSidebarArea').show();
+    $('#studentContentArea').show();
+    loadDashboard();
+    loadLessons();
+  }
+}
+
+// ========== Logout ==========
+function logout(){
+  Swal.fire({
+    title: 'ยืนยันออกจากระบบ?',
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'ใช่, ออกจากระบบ',
+    cancelButtonText: 'ยกเลิก'
+  }).then(function(result) {
+    if (result.isConfirmed) {
+      localStorage.removeItem('userSession');
+      currentUser = null;
+      renderGuestMenu();
+      $('#adminPanel').slideUp();
+      $('#dashboardSection').slideUp();
+      $('#contentDisplay').html('<div class="text-center mt-5"><i class="fas fa-hand-point-left fa-3x text-muted mb-3"></i><h3>เลือกบทเรียนทางซ้ายมือ</h3><p>เพื่อเริ่มต้นการเรียนรู้</p></div>');
+      Swal.fire({title: 'ออกจากระบบเรียบร้อย', icon: 'success', timer: 1500, showConfirmButton: false});
+    }
+  });
+}
+
+// ========== Admin Tables ==========
+function loadAdminTables() {
+  var loadingHTML = '<tr><td colspan="6" class="text-center text-muted p-3"><i class="fas fa-sync fa-spin me-2"></i> กำลังอัปเดตข้อมูล...</td></tr>';
+  if ($.fn.DataTable.isDataTable('#tableExams')) $('#tableExams').DataTable().destroy();
+  if ($.fn.DataTable.isDataTable('#tableLessons')) $('#tableLessons').DataTable().destroy();
+  if ($.fn.DataTable.isDataTable('#tableUsers')) $('#tableUsers').DataTable().destroy();
+  $('#tblExams').html(loadingHTML);
+  $('#tblLessons').html(loadingHTML);
+  $('#tblUsers').html(loadingHTML);
+  google.script.run.withSuccessHandler(function(data){
+    renderAdminExams(data.exams);
+    renderAdminLessons(data.lessons);
+    renderAdminUsers(data.users);
+  }).getAdminAllData();
+  
+  // Load Certs Admin
+  $('#tblCertsAdmin').html('<tr><td colspan="6" class="text-center p-4">กำลังโหลด...</td></tr>');
+  google.script.run.withSuccessHandler(function(certs){
+    var html = '';
+    if (!certs || certs.length === 0) {
+      html = '<tr><td colspan="6" class="text-center text-muted">- ยังไม่มีผู้ได้รับเกียรติบัตร -</td></tr>';
+    } else {
+      for(var i = 0; i < certs.length; i++) {
+        var c = certs[i];
+        var safeName = c.name.replace(/'/g, "\\'");
+        html += '<tr><td>' + (i + 1) + '</td><td>' + c.name + '</td><td><span class="badge bg-success">' + c.certNo + '</span></td><td>' + c.date + '</td><td class="fw-bold text-primary">' + c.score + '%</td><td class="text-center"><button type="button" class="btn btn-outline-dark btn-sm" onclick="adminDownloadCert(\'' + safeName + '\', \'' + c.certNo + '\')"><i class="fas fa-print"></i> พิมพ์</button></td></tr>';
+      }
+    }
+    if ($.fn.DataTable.isDataTable('#tableCertsAdmin')) {
+      $('#tableCertsAdmin').DataTable().destroy();
+    }
+    $('#tblCertsAdmin').html(html);
+    initMyDataTable('tableCertsAdmin');
+  }).withFailureHandler(function(err){
+    console.error(err);
+    $('#tblCertsAdmin').html('<tr><td colspan="6" class="text-center text-danger">โหลดข้อมูลไม่สำเร็จ</td></tr>');
+  }).getCertHistoryList();
+}
+
+function renderAdminExams(exams) {
+  var html = '';
+  if(exams.length === 0) {
+    html = '<tr><td colspan="6" class="text-center">ไม่พบข้อมูลข้อสอบ</td></tr>';
+  } else {
+    for(var i = 0; i < exams.length; i++) {
+      var ex = exams[i];
+      html += '<tr><td>' + ex.no + '</td><td class="fw-bold text-primary">' + ex.unit + '</td><td><span class="badge bg-info text-dark">' + ex.testType + '</span></td><td>' + ex.qType + '</td><td class="text-center fw-bold">' + ex.count + '</td><td class="text-center"><button type="button" class="btn btn-warning btn-sm me-1" onclick="startEdit(\'exam\', \'' + ex.ids + '\')"><i class="fas fa-edit"></i></button><button type="button" class="btn btn-danger btn-sm" onclick="deleteItem(\'exam\', \'' + ex.ids + '\')"><i class="fas fa-trash-alt"></i></button></td></tr>';
+    }
+  }
+  $('#tblExams').html(html);
+  initMyDataTable('tableExams');
+}
+
+function renderAdminLessons(lessons) {
+  var html = '';
+  if(lessons.length === 0) {
+    html = '<tr><td colspan="4" class="text-center">ไม่พบข้อมูลบทเรียน</td></tr>';
+  } else {
+    for(var i = 0; i < lessons.length; i++) {
+      var ls = lessons[i];
+      html += '<tr><td>' + ls.no + '</td><td class="fw-bold">' + ls.unit + '</td><td>' + ls.topic + '</td><td class="text-center"><button type="button" class="btn btn-warning btn-sm me-1" onclick="startEdit(\'lesson\', \'' + ls.id + '\')"><i class="fas fa-edit"></i></button><button type="button" class="btn btn-danger btn-sm" onclick="deleteItem(\'lesson\', \'' + ls.id + '\')"><i class="fas fa-trash-alt"></i></button></td></tr>';
+    }
+  }
+  $('#tblLessons').html(html);
+  initMyDataTable('tableLessons');
+}
+
+function renderAdminUsers(users) {
+  var html = '';
+  if(users.length === 0) {
+    html = '<tr><td colspan="5" class="text-center">ไม่พบข้อมูลผู้ใช้</td></tr>';
+  } else {
+    for(var i = 0; i < users.length; i++) {
+      var u = users[i];
+      var passStr = String(u.pass);
+      var passMask = passStr.length > 2 ? passStr.substring(0, 2) + '******' : '******';
+      html += '<tr><td>' + u.no + '</td><td><div class="fw-bold">' + u.name + '</div><small class="text-muted text-uppercase">' + u.role + '</small></td><td><span class="badge bg-light text-dark border">' + u.user + '</span></td><td class="text-muted font-monospace">' + passMask + '</td><td class="text-center"><button type="button" class="btn btn-warning btn-sm me-1" onclick="startEdit(\'user\', \'' + u.id + '\')"><i class="fas fa-edit"></i></button><button type="button" class="btn btn-danger btn-sm" onclick="deleteItem(\'user\', \'' + u.id + '\')"><i class="fas fa-trash-alt"></i></button></td></tr>';
+    }
+  }
+  $('#tblUsers').html(html);
+  initMyDataTable('tableUsers');
+}
+
+function initMyDataTable(tableId) {
+  if ($.fn.DataTable.isDataTable('#' + tableId)) {
+    $('#' + tableId).DataTable().destroy();
+  }
+  $('#' + tableId).DataTable({
+    "stateSave": true,
+    "pageLength": 5,
+    "lengthMenu": [5, 10, 25, 50],
+    "language": {
+      "lengthMenu": "แสดง _MENU_ แถว",
+      "zeroRecords": "ไม่พบข้อมูล",
+      "info": "หน้า _PAGE_ / _PAGES_",
+      "infoEmpty": "ไม่มีข้อมูล",
+      "infoFiltered": "(จาก _MAX_ รายการ)",
+      "search": "ค้นหา:",
+      "paginate": {"first": "|<", "last": ">|", "next": ">", "previous": "<"}
+    },
+    "order": [],
+    "columnDefs": [{"orderable": false, "targets": -1}]
+  });
+}
+
+function deleteItem(type, id) {
+  Swal.fire({
+    title: 'ยืนยันการลบ?',
+    text: "ข้อมูลจะถูกลบถาวร!",
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    confirmButtonText: 'ลบข้อมูล',
+    cancelButtonText: 'ยกเลิก'
+  }).then(function(result) {
+    if (result.isConfirmed) {
+      Swal.fire({title: 'กำลังลบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+      google.script.run.withSuccessHandler(function(res){
+        Swal.close();
+        if(res.status){
+          var Toast = Swal.mixin({toast: true, position: 'top-end', showConfirmButton: false, timer: 2000, timerProgressBar: true});
+          Toast.fire({icon: 'success', title: 'ลบข้อมูลเรียบร้อยแล้ว'});
+          loadAdminTables();
+          if(type === 'lesson') loadLessons();
+        } else {
+          Swal.fire('Error', 'ไม่สามารถลบข้อมูลได้', 'error');
+        }
+      }).deleteAdminItem(type, id);
+    }
+  });
+}
+
+function scrollToId(id) {
+  document.getElementById(id).scrollIntoView({behavior: 'smooth'});
+}
+
+function togglePass(inputId, btn) {
+  var input = document.getElementById(inputId);
+  var icon = btn.querySelector('i');
+  if (input.type === "password") {
+    input.type = "text";
+    icon.classList.remove('fa-eye');
+    icon.classList.add('fa-eye-slash');
+  } else {
+    input.type = "password";
+    icon.classList.remove('fa-eye-slash');
+    icon.classList.add('fa-eye');
+  }
+}
+
+// ========== Load Lessons ==========
+function loadLessons(callback){
+  if(!currentUser) return;
+  var p1 = new Promise(function(resolve) { google.script.run.withSuccessHandler(resolve).getLessons(); });
+  var p2 = new Promise(function(resolve) { google.script.run.withSuccessHandler(resolve).getStudentProgressData(currentUser.username); });
+  Promise.all([p1, p2]).then(function(values) {
+    var serverData = values[0];
+    lessonsData = serverData.lessons;
+    var unitOrder = serverData.unitOrder;
+    userHistory = values[1];
+    renderSidebarSequential(lessonsData, userHistory, unitOrder);
+    if (callback && typeof callback === "function") {
+      callback();
+    }
+  });
+}
+
+// --- Render Sidebar (with Cert Button) ---
+function renderSidebarSequential(data, history, unitOrder) {
+  var completedIds = [];
+  for(var h = 0; h < history.length; h++) completedIds.push(String(history[h].id));
+
+  var units = {};
+  for(var d = 0; d < data.length; d++) {
+    var item = data[d];
+    var uName = (item.unit === 'FINAL_TEST_ZONE') ? 'FINAL_TEST_ZONE' : item.unit;
+    if (!units[uName]) units[uName] = [];
+    units[uName].push(item);
+  }
+
+  var sortedKeys = [];
+  if (unitOrder && unitOrder.length > 0) {
+    for(var o = 0; o < unitOrder.length; o++) if (units[unitOrder[o]]) sortedKeys.push(unitOrder[o]);
+  }
+  var allKeys = Object.keys(units);
+  for(var k = 0; k < allKeys.length; k++) {
+    if (allKeys[k] !== 'FINAL_TEST_ZONE' && sortedKeys.indexOf(allKeys[k]) === -1) sortedKeys.push(allKeys[k]);
+  }
+  if (units['FINAL_TEST_ZONE']) sortedKeys.push('FINAL_TEST_ZONE');
+
+  var isNextItemLocked = false;
+  var allLessonsCompleted = true;
+  var html = '';
+  var unitIndex = 0;
+
+  for(var s = 0; s < sortedKeys.length; s++) {
+    var unitName = sortedKeys[s];
+    unitIndex++;
+    var items = units[unitName];
+    var displayUnitName = (unitName === 'FINAL_TEST_ZONE') ? items[0].displayUnit : unitName;
+    var showClass = (unitIndex === 1) ? 'show' : '';
+    var btnCollapsed = (unitIndex === 1) ? '' : 'collapsed';
+
+    html += '<div class="accordion-item"><h2 class="accordion-header" id="heading' + unitIndex + '"><button class="accordion-button ' + btnCollapsed + '" type="button" data-bs-toggle="collapse" data-bs-target="#collapse' + unitIndex + '">' + displayUnitName + '</button></h2><div id="collapse' + unitIndex + '" class="accordion-collapse collapse ' + showClass + '" data-bs-parent="#lessonAccordion"><div class="list-group list-group-flush">';
+
+    items.sort(function(a, b) {
+      var order = { 'Pre-test': 1, 'content': 2, 'Post-test': 3, 'Final Test': 4 };
+      var typeA = (a.topic.indexOf('Pre-test') !== -1) ? 'Pre-test' : (a.topic.indexOf('Post-test') !== -1) ? 'Post-test' : (a.topic.indexOf('Final') !== -1) ? 'Final Test' : 'content';
+      var typeB = (b.topic.indexOf('Pre-test') !== -1) ? 'Pre-test' : (b.topic.indexOf('Post-test') !== -1) ? 'Post-test' : (b.topic.indexOf('Final') !== -1) ? 'Final Test' : 'content';
+      return (order[typeA] || 2) - (order[typeB] || 2);
+    });
+
+    for(var t = 0; t < items.length; t++) {
+      var topic = items[t];
+      var isFinal = (topic.id === 'FINAL_TEST_ID' || topic.topic.indexOf('Final') !== -1);
+      var isCompleted = completedIds.indexOf(String(topic.id)) !== -1;
+      var isLocked = false;
+
+      if (isFinal) { if (!allLessonsCompleted) isLocked = true; } 
+      else {
+        if (isNextItemLocked) { isLocked = true; allLessonsCompleted = false; } 
+        else { if (!isCompleted) { isNextItemLocked = true; allLessonsCompleted = false; } }
+      }
+      if (currentUser && currentUser.role === 'admin') isLocked = false;
+
+      var icon = 'fa-book-open';
+      var textClass = 'text-dark';
+      var statusIcon = '';
+      var clickAction = '';
+      var bgClass = '';
+      
+      if (topic.topic.indexOf('Pre-test') !== -1) { icon = 'fa-clipboard-check'; textClass = 'text-primary'; }
+      else if (topic.topic.indexOf('Post-test') !== -1) { icon = 'fa-poll'; textClass = 'text-danger'; }
+      else if (isFinal) { icon = 'fa-graduation-cap'; textClass = 'text-success fw-bold'; }
+      
+      if (isCompleted) {
+        statusIcon = '<i class="fas fa-check-circle text-success float-end mt-1"></i>';
+        if (!isFinal) { textClass = 'text-muted'; icon = 'fa-check'; }
+      } else if (isLocked) {
+        statusIcon = '<i class="fas fa-lock text-secondary float-end mt-1 opacity-50"></i>';
+        textClass = 'text-secondary opacity-75';
+        icon = 'fa-lock';
+      } else {
+        statusIcon = '<i class="fas fa-play-circle text-white float-end mt-1"></i>';
+        textClass = 'text-white fw-bold';
+        bgClass = 'bg-primary';
+        icon = 'fa-play';
+      }
+      
+      var borderColor = isLocked ? '#ccc' : (isCompleted ? '#198754' : '#0d6efd');
+      if (!isLocked) {
+        if (topic.type === 'test') {
+           var safeUnit = topic.unit.replace(/'/g, "\\'");
+           if (isFinal && topic.displayUnit) safeUnit = topic.displayUnit.replace(/'/g, "\\'");
+           var safeTopic = topic.topic.replace(/'/g, "\\'");
+           clickAction = "loadExamInterface('" + safeUnit + "', '" + safeTopic + "', '" + topic.id + "')";
+        } else {
+           clickAction = "selectLesson('" + topic.id + "')";
+        }
+      } else {
+        var msg = isFinal ? 'ต้องเรียนให้ครบทุกบทก่อน' : 'ต้องเรียนบทก่อนหน้าให้ผ่านก่อน';
+        clickAction = "Swal.fire({icon: 'info', title: 'บทเรียนล็อคอยู่', text: '" + msg + "'})";
+      }
+
+      html += '<button type="button" class="list-group-item list-group-item-action ' + textClass + ' ' + bgClass + '" onclick="' + clickAction + '" style="text-align: left; border-left: 5px solid ' + borderColor + ';"><i class="fas ' + icon + ' me-2" style="width: 20px; text-align: center;"></i> ' + topic.topic + ' ' + statusIcon + '</button>';
+
+      if (isFinal) {
+          var myHistory = history.filter(function(h) { return String(h.id) === String(topic.id); });
+          var bestPercent = 0;
+          var hasPassed = false;
+          for(var h=0; h<myHistory.length; h++){
+              var p = parseInt(myHistory[h].percent) || 0;
+              if(p >= 70) { hasPassed = true; bestPercent = p; break; } 
+          }
+          if(hasPassed) {
+              html += '<div class="list-group-item bg-light text-center border-0 pt-0 pb-3"><small class="text-success fw-bold d-block mb-1">ผ่านเกณฑ์แล้ว (' + bestPercent + '%)</small><button type="button" class="btn btn-warning btn-sm w-100 shadow-sm rounded-pill animate__animated animate__pulse animate__infinite" onclick="generateCert()"><i class="fas fa-certificate"></i> ดาวน์โหลดเกียรติบัตร</button></div>';
+          }
+      }
+    } 
+    html += '</div></div></div>';
+  }
+  $('#lessonAccordion').html(html);
+}
+
+// --- Display Content (Lesson) ---
+function selectLesson(id) {
+  var lesson = null;
+  for(var i = 0; i < lessonsData.length; i++) {
+    if(lessonsData[i].id == id) { lesson = lessonsData[i]; break; }
+  }
+  if (lesson) loadContentDisplay(lesson.topic, lesson.content, lesson.link, lesson.id, lesson.mediaType);
+  else Swal.fire('Error', 'ไม่พบข้อมูลบทเรียน', 'error');
+}
+
+function loadContentDisplay(title, desc, link, id, mediaType){
+  var display = '<h3 class="text-primary border-bottom pb-2 mb-4">' + title + '</h3>';
+  var processedDesc = desc || '';
+
+  processedDesc = processedDesc.replace(/<audio[\s\S]*?(?:src=["']([^"']+)["']|<source\s+src=["']([^"']+)["'])[\s\S]*?<\/audio>/gi, function(match, src1, src2){
+      var rawUrl = src1 || src2; 
+      if(!rawUrl) return match;
+      var driveId = null;
+      var matchId = rawUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || rawUrl.match(/id=([a-zA-Z0-9_-]+)/);
+      if (matchId) driveId = matchId[1];
+      if (driveId) {
+          return '<div class="my-3 shadow-sm border rounded" style="max-width: 500px; height: 100px; overflow: hidden;"><iframe src="https://drive.google.com/file/d/' + driveId + '/preview" style="width: 600px; height: 100%; border:none; margin-left: -2px;" allow="autoplay"></iframe></div>';
+      } else {
+          return '<div class="my-3 p-2 bg-white rounded border shadow-sm" style="max-width: 500px;"><audio controls preload="metadata" style="width: 100%;"><source src="' + rawUrl + '"></audio></div>';
+      }
+  });
+
+  // ซ่อนรูปเสียในเนื้อหา
+  processedDesc = processedDesc.replace(/<img[^>]*>/g, '<span class="text-muted" style="font-size:0.8rem;"><i class="fas fa-image"></i> [รูปภาพประกอบ]</span>');
+
+  var mediaHtml = '';
+  if (link && link.trim() !== '') {
+    var directLink = convertGoogleDriveToDirectUrl(link);
+    var mType = String(mediaType || '').toLowerCase().trim(); 
+    var mainDriveId = null;
+    var mMatch = link.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || link.match(/id=([a-zA-Z0-9_-]+)/);
+    if(mMatch) mainDriveId = mMatch[1];
+
+    if (mType === 'audio' || (mainDriveId && (link.includes('view') || link.includes('download')) && mType !== 'image')) { 
+         if (mainDriveId) {
+             mediaHtml = '<div class="card bg-light mb-3 border-0 shadow-sm"><div class="card-body text-center"><h5 class="card-title text-muted mb-3"><i class="fas fa-headphones"></i> สื่อเสียงประกอบ</h5><div style="max-width: 500px; height: 100px; margin: 0 auto; overflow: hidden; border-radius: 10px; border: 1px solid #ddd;"><iframe src="https://drive.google.com/file/d/' + mainDriveId + '/preview" style="width: 600px; height: 100%; border:none; margin-left: -2px;" allow="autoplay"></iframe></div></div></div>';
+         } else {
+             mediaHtml = '<div class="card bg-light mb-3 border-0 shadow-sm"><div class="card-body text-center"><h5 class="card-title text-muted mb-3"><i class="fas fa-headphones"></i> สื่อเสียงประกอบ</h5><audio controls preload="metadata" style="width: 100%; max-width: 600px;"><source src="' + directLink + '"></audio></div></div>';
+         }
+    } 
+    else if (mType === 'video' || (link.indexOf('drive.google.com') !== -1 && link.indexOf('preview') !== -1 && mType !== 'image')) {
+      if(mainDriveId) {
+        mediaHtml = '<div class="mb-3 shadow border rounded overflow-hidden" style="width: 100%; height: 80vh; min-height: 600px;"><iframe src="https://drive.google.com/file/d/' + mainDriveId + '/preview" allow="autoplay" style="width:100%; height:100%; border:none;"></iframe></div>';
+        mediaHtml += '<div class="text-center mb-3"><small><a href="' + link + '" target="_blank" class="text-decoration-none text-muted"><i class="fas fa-external-link-alt"></i> เปิดหน้าต่างใหม่</a></small></div>';
+      }
+    } else if (link.indexOf('youtube') !== -1 || link.indexOf('youtu.be') !== -1) { 
+          var videoId = link.indexOf('v=') !== -1 ? link.split('v=')[1].split('&')[0] : link.split('/').pop().split('?')[0];
+          mediaHtml = '<div class="ratio ratio-16x9 mb-3 shadow-sm rounded overflow-hidden"><iframe src="https://www.youtube.com/embed/' + videoId + '" allowfullscreen></iframe></div>';
+    } 
+    else if (mType === 'image') {
+         // *** FIX: ใช้ Thumbnail Link ***
+         if (mainDriveId) {
+             var imgUrl = "https://drive.google.com/thumbnail?id=" + mainDriveId + "&sz=w1000";
+             mediaHtml = '<div class="text-center mb-4"><img src="' + imgUrl + '" class="img-fluid rounded shadow-sm border" style="max-height: 500px;"></div>';
+         } else {
+             mediaHtml = '<div class="text-center mb-4"><img src="' + link + '" class="img-fluid rounded shadow-sm border" style="max-height: 500px;"></div>';
+         }
+    }
+    else {
+      mediaHtml = '<div class="alert alert-light border text-center my-3"><a href="' + link + '" target="_blank" class="btn btn-outline-primary"><i class="fas fa-link"></i> เปิดลิงก์ประกอบ</a></div>';
+    }
+  }
+
+  display += '<div class="card mb-3 shadow-sm"><div class="card-body text-dark summernote-content" style="font-size: 1.1rem; line-height: 1.6;">' + processedDesc + '</div></div>' + mediaHtml;
+  display += '<div class="mt-5 text-center mb-4"><button type="button" id="btnFinishLesson" data-lesson-id="' + id + '" class="btn btn-success btn-lg px-5 rounded-pill shadow"><i class="fas fa-check-circle me-2"></i> เรียนจบเรื่องนี้</button></div>';
+  $('#contentDisplay').html(display).hide().fadeIn();
+  runEmbeddedQuizzes();
+}
+
+function markComplete(lessonId){
+  if(!currentUser) {
+    Swal.fire('แจ้งเตือน', 'กรุณาเข้าสู่ระบบก่อน', 'warning');
+    return;
+  }
+  Swal.fire({
+    title: 'กำลังบันทึก...',
+    html: 'กรุณารอสักครู่...',
+    allowOutsideClick: false,
+    didOpen: function() { Swal.showLoading(); }
+  });
+  google.script.run.withSuccessHandler(function(percent){
+    loadLessons(function() {
+      var allButtons = $('#lessonAccordion button.list-group-item-action');
+      var currentIndex = -1;
+      allButtons.each(function(index) {
+        if (String($(this).data('id')) === String(lessonId)) {
+          currentIndex = index;
+          return false;
+        }
+      });
+      if (currentIndex !== -1 && currentIndex < allButtons.length - 1) {
+        var nextBtn = allButtons.eq(currentIndex + 1);
+        Swal.close();
+        var Toast = Swal.mixin({toast: true, position: 'top-end', showConfirmButton: false, timer: 3000, timerProgressBar: true});
+        Toast.fire({icon: 'success', title: 'บันทึกสำเร็จ! กำลังไปบทถัดไป...'});
+        nextBtn.trigger('click');
+        var parentCollapse = nextBtn.closest('.accordion-collapse');
+        if (!parentCollapse.hasClass('show')) {
+          parentCollapse.collapse('show');
+        }
+        nextBtn[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+      } else {
+        Swal.fire({icon: 'success', title: 'ยินดีด้วย!', text: 'คุณเรียนจบเนื้อหาทั้งหมดในส่วนนี้แล้ว', confirmButtonText: 'ตกลง'});
+      }
+    });
+  }).markLessonComplete(currentUser.username, lessonId);
+}
+
+// ========== Dashboard ==========
+function loadDashboard(){
+  if(!currentUser) return;
+  $('#dashboardSection').fadeIn();
+  $('#dashboardCards').html('<div class="text-center w-100"><div class="spinner-border text-primary"></div> กำลังคำนวณผลการเรียน...</div>');
+  google.script.run.withSuccessHandler(function(units){
+    renderDashboardCards(units);
+  }).getUserDashboardStats(currentUser.username);
+}
+
+function renderDashboardCards(units){
+  var html = '';
+  var keys = Object.keys(units).sort(function(a,b) {
+    var numA = parseInt(a.replace(/\D/g, '')) || 0;
+    var numB = parseInt(b.replace(/\D/g, '')) || 0;
+    return numA - numB;
+  });
+  for(var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var u = units[key];
+    var isFinalUnit = u.name.toLowerCase().indexOf('final') !== -1 || u.name.indexOf('achievement') !== -1;
+    var cardContent = '';
+    if(isFinalUnit){
+      var finalScore = u.finalScore === '-' ? 0 : parseInt(u.finalScore);
+      var badgeColor = finalScore >= 70 ? 'bg-success' : (u.finalScore === '-' ? 'bg-secondary' : 'bg-danger');
+      var passText = finalScore >= 70 ? '(ผ่านเกณฑ์)' : (u.finalScore === '-' ? '' : '(ไม่ผ่านเกณฑ์)');
+      var certBtn = finalScore >= 70 ? '<div class="mt-2"><button type="button" class="btn btn-warning btn-sm text-dark" onclick="generateCert()"><i class="fas fa-certificate"></i> รับเกียรติบัตร</button></div>' : '';
+      cardContent = '<div class="text-center py-3"><h6 class="text-muted">Final Test Score</h6><h1 class="display-4 fw-bold ' + (finalScore >= 70 ? 'text-success' : 'text-secondary') + '">' + (u.finalScore === '-' ? '--' : u.finalScore) + '</h1><span class="badge ' + badgeColor + '">' + (u.finalScore === '-' ? 'ยังไม่สอบ' : 'สอบแล้ว ' + passText) + '</span>' + certBtn + '</div>';
+    } else {
+      var preScore = u.preScore === '-' ? '--' : parseInt(u.preScore);
+      var preFullScore = u.preFullScore || 0;
+      var prePercent = (preScore !== '--' && preFullScore > 0) ? Math.round((preScore / preFullScore) * 100) : 0;
+      var preDisplay = preScore !== '--' ? preScore + ' | ' + prePercent + '%' : '--';
+      var postScore = u.postScore === '-' ? '--' : parseInt(u.postScore);
+      var postFullScore = u.postFullScore || 0;
+      var postPercent = (postScore !== '--' && postFullScore > 0) ? Math.round((postScore / postFullScore) * 100) : 0;
+      var postDisplay = postScore !== '--' ? postScore + ' | ' + postPercent + '%' : '--';
+      cardContent = '<div class="d-flex justify-content-between align-items-center mb-2"><span class="badge bg-primary rounded-pill">Pre-test</span><span class="fw-bold text-primary">' + preDisplay + '</span></div><div class="mb-2"><small class="text-muted">ความก้าวหน้าเนื้อหา</small><div class="progress" style="height: 10px;"><div class="progress-bar bg-info" role="progressbar" style="width: ' + u.percent + '%"></div></div><div class="text-end"><small>' + u.percent + '%</small></div></div><div class="d-flex justify-content-between align-items-center border-top pt-2"><span class="badge bg-danger rounded-pill">Post-test</span><span class="fw-bold text-danger">' + postDisplay + '</span></div>';
+    }
+    html += '<div class="col"><div class="card h-100 shadow-sm border-0"><div class="card-header bg-white fw-bold border-bottom-0">' + u.name + '</div><div class="card-body">' + cardContent + '</div></div></div>';
+  }
+  $('#dashboardCards').html(html);
+}
+
+// ========== Exam Interface ==========
+function loadExamInterface(unit, testType, lessonId){
+  if(!currentUser) {
+    Swal.fire('แจ้งเตือน', 'กรุณาเข้าสู่ระบบก่อนทำข้อสอบ', 'warning');
+    return;
+  }
+  Swal.fire({title: 'กำลังโหลดข้อสอบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+  
+  google.script.run.withSuccessHandler(function(data){
+    Swal.close();
+    // รับค่าเป็น Object {questions: [], duration: 0}
+    var qList = data.questions || [];
+    var duration = data.duration || 0;
+
+    if(qList.length > 0){
+      renderQuestions(unit, testType, qList, lessonId, duration);
+    } else {
+      Swal.fire('แจ้งเตือน', 'ไม่พบข้อสอบ ' + testType + ' ใน ' + unit, 'warning');
+      $('#contentDisplay').html('<div class="alert alert-warning text-center">ไม่พบข้อสอบชุดนี้</div>');
+    }
+  }).getExamQuestions(unit, testType);
+}
+
+// 1. ฟังก์ชันโหลดทำเนียบผู้ได้รับเกียรติบัตร (แก้ Error: loadPublicCertTable is not defined)
+function loadPublicCertTable() {
+  $('#tblCerts').html('<tr><td colspan="6" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> กำลังโหลด...</td></tr>');
+  
+  google.script.run.withSuccessHandler(function(certs){
+    var html = '';
+    if (!certs || certs.length === 0) {
+      html = '<tr><td colspan="6" class="text-center text-muted">- ยังไม่มีผู้ได้รับเกียรติบัตร -</td></tr>';
+    } else {
+      // แสดง 10 คนล่าสุด
+      certs.slice(0, 10).forEach(function(c, index) {
+        html += '<tr>' +
+                '<td>' + (index + 1) + '</td>' +
+                '<td>' + c.name + '</td>' +
+                '<td><span class="badge bg-success">' + c.certNo + '</span></td>' +
+                '<td>' + c.date + '</td>' +
+                '<td class="fw-bold text-primary">' + c.score + '%</td>' +
+                '<td class="text-center"><button class="btn btn-sm btn-outline-primary" onclick="adminDownloadCert(\'' + c.name + '\', \'' + c.certNo + '\')"><i class="fas fa-print"></i></button></td>' +
+                '</tr>';
+      });
+    }
+    
+    if ($.fn.DataTable.isDataTable('#tableCerts')) {
+       $('#tableCerts').DataTable().destroy();
+    }
+    $('#tblCerts').html(html);
+    // initMyDataTable('tableCerts'); // ถ้าต้องการ sort/search ให้เปิดบรรทัดนี้
+  }).getCertHistoryList();
+}
+
+// --- Render Exam (Updated) ---
+function renderQuestions(unit, testType, questions, lessonId, durationMinutes){
+  var isFinal = String(testType).toLowerCase().includes('final') || String(testType).toLowerCase().includes('achievement');
+  var html = '';
+
+  if(isFinal && durationMinutes > 0) {
+      html += `
+      <div id="stickyTimerBar" class="sticky-top bg-dark text-white p-3 mb-3 shadow rounded d-flex justify-content-between align-items-center" style="z-index:1020;">
+          <div class="fw-bold"><i class="fas fa-file-alt text-warning"></i> ${testType}</div>
+          <div class="fs-4 fw-bold text-danger">
+              <i class="fas fa-clock"></i> <span id="timerDisplay">--:--</span>
+          </div>
+      </div>`;
+  } else {
+      html += '<h3 class="text-danger border-bottom pb-2 mb-3">' + testType + ': ' + unit + '</h3>';
+  }
+
+  html += '<form id="examForm">';
+  
+  var fixExamMedia = function(htmlContent) {
+      if (!htmlContent) return '';
+      htmlContent = htmlContent.replace(/src="\/\/www\.youtube/g, 'src="https://www.youtube');
+      // ซ่อนรูปภาพที่เสีย (Broken Image) ในเนื้อหา เพื่อไม่ให้รกตา (เพราะเราจะโชว์รูปใหญ่ด้านล่างแทน)
+      htmlContent = htmlContent.replace(/<img[^>]*>/g, '<span class="text-muted" style="font-size:0.8rem;"><i class="fas fa-image"></i> [รูปภาพประกอบ]</span>'); 
+      
+      htmlContent = htmlContent.replace(/<audio[\s\S]*?(?:src=["']([^"']+)["']|<source\s+src=["']([^"']+)["'])[\s\S]*?<\/audio>/gi, function(match, src1, src2){
+          var rawUrl = src1 || src2;
+          if(!rawUrl) return match;
+          var driveId = null;
+          var matchId = rawUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || rawUrl.match(/id=([a-zA-Z0-9_-]+)/);
+          if (matchId) driveId = matchId[1];
+          if (driveId) {
+             return '<div class="my-2 shadow-sm border rounded" style="max-width: 500px; height: 100px; overflow: hidden;"><iframe src="https://drive.google.com/file/d/' + driveId + '/preview" style="width: 600px; height: 100%; border:none; margin-left: -2px;" allow="autoplay"></iframe></div>';
+          } else {
+             return '<div class="my-2 p-2 bg-light rounded border" style="max-width: 400px;"><audio controls style="width: 100%;"><source src="' + rawUrl + '"></audio></div>';
+          }
+      });
+      return htmlContent;
+  };
+  
+  for(var q = 0; q < questions.length; q++) {
+    var qItem = questions[q];
+    var qText = fixExamMedia(qItem.question);
+    
+    // Inline Input Logic
+    var isInlineRendered = false; 
+    var partIndex = 0;
+    if (qItem.qType === 'short' && qText.includes('___')) {
+        qText = qText.replace(/___/g, function() {
+            var inputName = 'q_' + qItem.id + '_part_' + partIndex; partIndex++;
+            return '<input type="text" class="form-control d-inline-block text-primary fw-bold mx-1 text-center" style="width: 150px; display: inline-block; border: none; border-bottom: 2px solid #0d6efd; border-radius: 0; padding: 0 5px; background: transparent;" name="' + inputName + '" autocomplete="off">';
+        });
+        isInlineRendered = true;
+    } else if (qItem.qType === 'dropdown' && qText.includes('___')) {
+        var correctAnswers = (qItem.answer || '').split('|');
+        var distractors = (qItem.choices || '').split('|');
+        var allOptions = [...new Set([...correctAnswers, ...distractors])].filter(x => x && x.trim() !== "");
+        allOptions.sort(function() { return Math.random() - 0.5; });
+        var optionsHtml = '<option value="" selected disabled>Select...</option>';
+        for(var d = 0; d < allOptions.length; d++) optionsHtml += '<option value="' + allOptions[d] + '">' + allOptions[d] + '</option>';
+        qText = qText.replace(/___/g, function() {
+            var inputName = 'q_' + qItem.id + '_part_' + partIndex; partIndex++;
+            return '<select class="form-select d-inline-block w-auto mx-1 border-primary text-primary fw-bold" style="display: inline-block; padding-top: 2px; padding-bottom: 2px; min-width: 120px;" name="' + inputName + '">' + optionsHtml + '</select>';
+        });
+        isInlineRendered = true;
+    }
+
+    var displayStyle = (isFinal && q > 0) ? 'display:none;' : '';
+    var stepId = 'question_step_' + q;
+
+    html += '<div id="' + stepId + '" class="question-step" style="' + displayStyle + '">';
+    html += '<div class="card mb-3 border-0 shadow-sm"><div class="card-body">';
+    html += '<div class="d-flex"><span class="fw-bold me-2 fs-5">' + (q + 1) + '.</span><div class="flex-grow-1 summernote-content" style="line-height: 2.5;">' + qText + '</div></div>';
+    
+    // Media Logic
+    var showBottomMedia = true;
+    if(qItem.mediaLink && qItem.mediaLink.trim() !== "") {
+        var qMatch = qItem.mediaLink.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || qItem.mediaLink.match(/id=([a-zA-Z0-9_-]+)/);
+        var qDriveId = qMatch ? qMatch[1] : null;
+        if (qDriveId && qText.includes(qDriveId)) { showBottomMedia = false; }
+        if (qItem.question.includes(qItem.mediaLink)) { showBottomMedia = false; }
+    }
+
+    if(qItem.mediaLink && qItem.mediaLink.trim() !== "" && showBottomMedia) {
+        var mLink = convertGoogleDriveToDirectUrl(qItem.mediaLink);
+        var mType = String(qItem.mediaType || '').toLowerCase().trim(); 
+        var qDriveId = null;
+        var qMatch = qItem.mediaLink.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || qItem.mediaLink.match(/id=([a-zA-Z0-9_-]+)/);
+        if(qMatch) qDriveId = qMatch[1];
+
+        if (mType === 'audio' || (qDriveId && (mLink.includes('view') || mLink.includes('download')) && mType !== 'image')) {
+             if (qDriveId) html += '<div class="mt-2 ms-4 mb-3 shadow-sm border rounded" style="max-width: 500px; height: 100px; overflow: hidden;"><iframe src="https://drive.google.com/file/d/' + qDriveId + '/preview" style="width: 600px; height: 100%; border:none; margin-left: -2px;" allow="autoplay"></iframe></div>';
+             else html += '<div class="mt-2 ms-4 mb-3 p-3 bg-light rounded border shadow-sm" style="max-width: 500px;"><audio controls style="width: 100%;"><source src="' + mLink + '"></audio></div>';
+        } 
+        else if (mType === 'video' || (qItem.mediaLink.includes('drive.google.com') && qItem.mediaLink.includes('preview') && mType !== 'image')) {
+             if(qDriveId) html += '<div class="mt-2 ms-4 mb-3" style="max-width: 500px;"><div class="ratio ratio-16x9"><iframe src="https://drive.google.com/file/d/' + qDriveId + '/preview" style="border:none;"></iframe></div></div>';
+             else html += '<div class="mt-2 ms-4 mb-3"><a href="' + mLink + '" target="_blank" class="btn btn-sm btn-outline-info">เปิดสื่อประกอบ</a></div>';
+        }
+        else if (mType === 'image') {
+             // *** FIX: ใช้ Thumbnail Link เพื่อให้แสดงรูปจาก Drive ได้ชัวร์ๆ ***
+             if (qDriveId) {
+                 var imgUrl = "https://drive.google.com/thumbnail?id=" + qDriveId + "&sz=w1000"; // w1000 คือขนาดความกว้าง
+                 html += '<div class="mt-2 ms-4 mb-3 text-center"><img src="' + imgUrl + '" class="img-fluid rounded shadow-sm border" style="max-height: 400px;"></div>';
+             } else {
+                 html += '<div class="mt-2 ms-4 mb-3 text-center"><img src="' + mLink + '" class="img-fluid rounded shadow-sm border" style="max-height: 400px;"></div>';
+             }
+        }
+        else {
+             html += '<div class="mt-2 ms-4 mb-3"><a href="' + mLink + '" target="_blank" class="btn btn-sm btn-outline-info"><i class="fas fa-external-link-alt"></i> เปิดสื่อประกอบ</a></div>';
+        }
+    }
+
+    html += '<div class="mt-3 ms-4">';
+    // ... (ส่วน Inputs MCQ/TF/Matching คงเดิม ไม่ต้องแก้) ...
+    if(qItem.qType === 'mcq'){
+      var choicesStr = qItem.choices || '';
+      var choices = choicesStr.split('|');
+      var validChoices = [];
+      for(var i=0; i<choices.length; i++) if(choices[i] && choices[i].trim() !== "") validChoices.push(choices[i]);
+      if(validChoices.length > 0) {
+        validChoices.sort(function() { return Math.random() - 0.5; });
+        for(var vc = 0; vc < validChoices.length; vc++) {
+          var choice = validChoices[vc];
+          var safeChoice = fixExamMedia(choice).replace(/"/g, '&quot;'); 
+          html += '<div class="form-check mb-2"><input class="form-check-input" type="radio" name="q_' + qItem.id + '" id="q_' + qItem.id + '_' + vc + '" value="' + safeChoice + '"><label class="form-check-label" for="q_' + qItem.id + '_' + vc + '">' + fixExamMedia(choice) + '</label></div>';
+        }
+      }
+    } else if(qItem.qType === 'tf'){
+      html += '<div class="form-check mb-2"><input class="form-check-input" type="radio" name="q_' + qItem.id + '" id="q_' + qItem.id + '_t" value="True"><label class="form-check-label" for="q_' + qItem.id + '_t">True</label></div>';
+      html += '<div class="form-check mb-2"><input class="form-check-input" type="radio" name="q_' + qItem.id + '" id="q_' + qItem.id + '_f" value="False"><label class="form-check-label" for="q_' + qItem.id + '_f">False</label></div>';
+    } else if(qItem.qType === 'short' && !isInlineRendered){
+      html += '<input type="text" class="form-control" name="q_' + qItem.id + '" placeholder="พิมพ์คำตอบของคุณ" autocomplete="off">';
+    } else if(qItem.qType === 'dropdown' && !isInlineRendered){
+      var ddChoices = (qItem.choices || '').split('|').filter(x => x && x.trim() !== "");
+      if(ddChoices.length > 0) {
+        ddChoices.sort(function() { return Math.random() - 0.5; });
+        var selectHtml = '<select class="form-select d-inline-block w-auto mx-1 border-primary" name="q_' + qItem.id + '"><option value="" selected disabled>-- เลือกคำตอบ --</option>';
+        for(var ddc = 0; ddc < ddChoices.length; ddc++) selectHtml += '<option value="' + ddChoices[ddc] + '">' + ddChoices[ddc] + '</option>';
+        selectHtml += '</select>';
+        html += '<div class="alert alert-light border p-3">เลือกคำตอบที่ถูกต้อง: ' + selectHtml + '</div>';
+      }
+    } else if(qItem.qType === 'matching'){
+      var pairsRaw = (qItem.choices || '').split('|');
+      var leftItems = [], rightItems = [];
+      for(var pr = 0; pr < pairsRaw.length; pr++) {
+        var parts = pairsRaw[pr].split(':');
+        if(parts.length >= 2) { leftItems.push(parts[0]); rightItems.push(parts[1]); }
+      }
+      if(leftItems.length > 0) {
+        rightItems.sort(function() { return Math.random() - 0.5; });
+        html += '<div class="table-responsive"><table class="table table-borderless">';
+        for(var i = 0; i < leftItems.length; i++) {
+          var options = '<option value="" selected disabled>-- เลือกคู่ --</option>';
+          for(var r = 0; r < rightItems.length; r++) options += '<option value="' + rightItems[r] + '">' + rightItems[r] + '</option>';
+          html += '<tr><td class="align-middle border rounded bg-light px-3 py-2" width="45%">' + fixExamMedia(leftItems[i]) + '</td><td class="align-middle text-center" width="10%"><i class="fas fa-arrow-right text-muted"></i></td><td width="45%"><select class="form-select" name="q_' + qItem.id + '_pair_' + i + '">' + options + '</select><input type="hidden" name="q_' + qItem.id + '_key_' + i + '" value="' + leftItems[i] + '"></td></tr>';
+        }
+        html += '</table></div>';
+      }
+    }
+
+    html += '</div></div></div>';
+    if(isFinal) {
+        var prevBtnHtml = (q > 0) ? `<button type="button" class="btn btn-outline-secondary px-4 rounded-pill" onclick="updateExamStep(${q}, -1)"><i class="fas fa-arrow-left"></i> ย้อนกลับ</button>` : '<div></div>';
+        var nextBtnHtml = (q < questions.length - 1) ? `<button type="button" class="btn btn-primary px-4 rounded-pill" onclick="updateExamStep(${q}, 1)">ข้อถัดไป <i class="fas fa-arrow-right"></i></button>` : `<button type="submit" class="btn btn-success px-4 rounded-pill shadow"><i class="fas fa-paper-plane"></i> ส่งคำตอบ</button>`;
+        html += `<div class="d-flex justify-content-between align-items-center mb-4">${prevBtnHtml}${nextBtnHtml}</div>`;
+    }
+    html += '</div>';
+  } 
+
+  html += '<input type="hidden" id="examTargetId" value="' + lessonId + '">';
+  if(!isFinal) { html += `<div class="d-grid gap-2 col-6 mx-auto mt-4 mb-5"><button type="submit" class="btn btn-success btn-lg shadow rounded-pill"><i class="fas fa-paper-plane"></i> ส่งคำตอบ</button></div>`; }
+  html += '</form>';
+  $('#contentDisplay').html(html).hide().fadeIn();
+
+  // Timer & Submit Logic (เหมือนเดิม)
+  if(isFinal && durationMinutes > 0) {
+      window.scrollTo(0, 0);
+      var timeLimit = durationMinutes * 60;
+      var display = $('#timerDisplay');
+      if(window.examTimerInterval) clearInterval(window.examTimerInterval);
+      function updateTimer() {
+          var minutes = Math.floor(timeLimit / 60);
+          var seconds = timeLimit % 60;
+          minutes = minutes < 10 ? "0" + minutes : minutes;
+          seconds = seconds < 10 ? "0" + seconds : seconds;
+          display.text(minutes + ":" + seconds);
+          if(timeLimit < 60) display.removeClass('text-white').addClass('text-warning blink');
+          if (timeLimit <= 0) {
+              clearInterval(window.examTimerInterval);
+              Swal.fire({icon: 'error', title: 'หมดเวลา!', text: 'หมดเวลาทำข้อสอบแล้ว กรุณาเริ่มทำใหม่', allowOutsideClick: false, confirmButtonText: 'ตกลง', confirmButtonColor: '#d33'}).then(() => { $('#contentDisplay').html(''); loadDashboard(); }); 
+              return;
+          }
+          timeLimit--;
+      }
+      updateTimer();
+      window.examTimerInterval = setInterval(updateTimer, 1000);
+  }
+
+  $('#examForm').submit(function(e){
+    e.preventDefault();
+    if(window.examTimerInterval) clearInterval(window.examTimerInterval);
+    var unansweredCount = 0;
+    var firstMissingIndex = -1;
+    for(var i = 0; i < questions.length; i++) {
+        var q = questions[i];
+        var isAnswered = false;
+        if (q.qType === 'matching') {
+            var totalPairs = $('select[name^="q_' + q.id + '_pair_"]').length;
+            var answeredPairs = 0;
+            $('select[name^="q_' + q.id + '_pair_"]').each(function() { if($(this).val()) answeredPairs++; });
+            if(totalPairs > 0 && answeredPairs === totalPairs) isAnswered = true;
+        } else if (q.qType === 'short' || q.qType === 'dropdown') {
+            var parts = $('[name^="q_' + q.id + '_part_"]');
+            if (parts.length > 0) {
+                var allPartsFilled = true;
+                parts.each(function() { if (!$(this).val() || $(this).val().trim() === "") allPartsFilled = false; });
+                if (allPartsFilled) isAnswered = true;
+            } else {
+                var val = $('[name="q_' + q.id + '"]').val();
+                if (val && val.trim() !== "") isAnswered = true;
+            }
+        } else if (q.qType === 'mcq' || q.qType === 'tf') {
+            if($('input[name="q_' + q.id + '"]:checked').length > 0) isAnswered = true;
+        }
+        if(!isAnswered) {
+            unansweredCount++;
+            if(firstMissingIndex === -1) firstMissingIndex = i;
+        }
+    }
+    if (unansweredCount > 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'ทำข้อสอบไม่ครบ',
+            text: 'คุณยังไม่ได้ทำข้อสอบอีก ' + unansweredCount + ' ข้อ กรุณาทำข้อสอบให้ครบก่อนส่ง',
+            confirmButtonText: 'ไปที่ข้อที่ยังไม่ได้ทำ',
+            confirmButtonColor: '#0d6efd'
+        }).then(() => {
+            if(isFinal && durationMinutes > 0) window.examTimerInterval = setInterval(updateTimer, 1000);
+            if(isFinal) {
+                 $('.question-step').hide();
+                 $('#question_step_' + firstMissingIndex).fadeIn();
+            }
+            $('html, body').animate({ scrollTop: $('#question_step_' + firstMissingIndex).offset().top - 100 }, 500);
+        });
+        return; 
+    }
+    Swal.fire({title: 'ยืนยันส่งคำตอบ?', text: 'เมื่อส่งแล้วจะไม่สามารถแก้ไขได้', icon: 'question', showCancelButton: true, confirmButtonText: 'ส่งเลย'}).then(function(result) {
+      if (result.isConfirmed) {
+        var userAnswers = {};
+        for(var qi = 0; qi < questions.length; qi++) {
+          var qChk = questions[qi];
+          var ans = null;
+          if(qChk.qType === 'matching') {
+            var pairs = [];
+            $('input[name^="q_' + qChk.id + '_key_"]').each(function(idx) {
+                var k = $(this).val();
+                var v = $('select[name="q_' + qChk.id + '_pair_' + idx + '"]').val();
+                if(k && v) pairs.push(k + ":" + v);
+            });
+            if(pairs.length > 0) ans = pairs.join('|');
+          } else if ((qChk.qType === 'short' || qChk.qType === 'dropdown') && $('[name^="q_' + qChk.id + '_part_"]').length > 0) {
+              var partsArr = [];
+              $('[name^="q_' + qChk.id + '_part_"]').each(function() { partsArr.push($(this).val() || ""); });
+              ans = partsArr.join('|');
+          } else {
+            ans = $('input[name="q_'+qChk.id+'"]:checked').val() || $('input[name="q_'+qChk.id+'"]').val() || $('select[name="q_'+qChk.id+'"]').val();
+          }
+          userAnswers[qChk.id] = ans;
+        }
+        var targetIdToSave = $('#examTargetId').val();
+        Swal.fire({title: 'กำลังตรวจคำตอบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+        google.script.run.withSuccessHandler(function(res){
+          var msg = 'คุณทำได้ ' + res.score + ' จาก ' + res.total + ' ข้อ (' + res.percent + '%)';
+          var isPass = res.percent >= 70;
+          var showCertBtn = (isFinal && isPass); 
+          if(showCertBtn) msg += '<br><br><h4 class="text-success">ยินดีด้วย! คุณผ่านการทดสอบ</h4>';
+          else if(isFinal && !isPass) msg += '<br><br><span class="text-danger">เสียใจด้วย คุณยังไม่ผ่านเกณฑ์ (70%)</span>';
+          Swal.fire({
+              title: 'ผลการสอบ',
+              html: msg,
+              icon: isPass ? 'success' : 'warning',
+              showCancelButton: showCertBtn,
+              confirmButtonText: 'ตกลง',
+              cancelButtonText: '<i class="fas fa-certificate"></i> ดาวน์โหลดเกียรติบัตร',
+              cancelButtonColor: '#ffc107'
+          }).then(function(result) {
+              if(result.isConfirmed){ loadDashboard(); loadLessons(); $('#contentDisplay').html('<div class="alert alert-info text-center">บันทึกคะแนนเรียบร้อย</div>'); }
+              else if (result.dismiss === Swal.DismissReason.cancel) { generateCert(); loadDashboard(); }
+          });
+        }).processAndSaveExam(currentUser.username, targetIdToSave, userAnswers, unit, testType);
+      } else {
+          if(isFinal && durationMinutes > 0) window.examTimerInterval = setInterval(updateTimer, 1000);
+      }
+    });
+  });
+}
+
+// ฟังก์ชันควบคุมการเปลี่ยนข้อ (Navigation)
+function updateExamStep(currentIndex, direction) {
+    var nextIndex = currentIndex + direction;
+    $('#question_step_' + currentIndex).hide();
+    var nextStep = $('#question_step_' + nextIndex);
+    if(nextStep.length > 0) {
+        nextStep.fadeIn();
+        $('html, body').animate({ scrollTop: $('#contentDisplay').offset().top - 60 }, 'fast');
+    }
+}
+
+// ฟังก์ชันสำหรับกดปุ่ม Next (Pagination)
+function nextQuestion(currentIndex) {
+    // 1. ซ่อนข้อปัจจุบัน
+    $('#step_' + currentIndex).hide();
+    $('#btn_next_' + currentIndex).hide();
+    
+    // 2. แสดงข้อถัดไป
+    var nextIndex = currentIndex + 1;
+    if ($('#step_' + nextIndex).length > 0) {
+        $('#step_' + nextIndex).fadeIn();
+        // ถ้ามีปุ่ม Next ของข้อถัดไป ก็ให้แสดงด้วย
+        $('#btn_next_' + nextIndex).show();
+        
+        // ถ้าเป็นข้อสุดท้าย ให้แสดงปุ่ม Submit
+        if ($('#step_' + (nextIndex + 1)).length === 0) {
+            $('#submitBtnArea').fadeIn();
+        }
+    } else {
+        // กรณีไม่มีข้อถัดไปแล้ว (จริงๆ Logic ข้างบนดักไว้แล้ว)
+        $('#submitBtnArea').fadeIn();
+    }
+    
+    // เลื่อนจอขึ้นบนนิดหน่อย
+    $('html, body').animate({ scrollTop: $('#contentDisplay').offset().top - 60 }, 'fast');
+}
+
+// ========== Audio Player ==========
+function initCustomAudioPlayers() {
+  // Simple implementation - just use native audio
+}
+
+// --- javascript.html ---
+
+// ฟังก์ชันเรียก Modal แทรกแบบฝึกหัด (ปรับปรุงใหม่ รองรับ 5 รูปแบบ + แก้ตำแหน่ง)
+function insertEmbeddedQuiz(context) {
+    // 1. *** หัวใจสำคัญ: จำตำแหน่งเคอร์เซอร์ปัจจุบันไว้ก่อน ***
+    context.invoke('editor.saveRange');
+
+    $('#embeddedQuizModal').remove();
+    
+    // สร้าง HTML ของ Modal
+    var modalHtml = `
+    <div class="modal fade" id="embeddedQuizModal" tabindex="-1" style="z-index: 1060;">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title"><i class="fas fa-question-circle me-2"></i>แทรกแบบฝึกหัดระหว่างเรียน</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            
+            <div class="mb-3">
+              <label class="form-label fw-bold">รูปแบบข้อสอบ</label>
+              <select id="eqQuizType" class="form-select">
+                <option value="mcq">1. เลือกตอบ (Multiple Choice)</option>
+                <option value="tf">2. ถูก/ผิด (True/False)</option>
+                <option value="short">3. เติมคำ (Short Answer)</option>
+                <option value="dropdown">4. เลือกตอบจากรายการ (Dropdown)</option>
+                <option value="matching">5. จับคู่ (Matching)</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold">โจทย์ / คำสั่ง</label>
+              <input id="eqQuestion" class="form-control" placeholder="พิมพ์โจทย์คำถามที่นี่...">
+            </div>
+
+            <div id="eqMcqArea" class="eq-input-area">
+              <label class="form-label">ตัวเลือก (ช่องแรกคือเฉลย)</label>
+              <div class="input-group mb-2">
+                 <span class="input-group-text bg-success text-white">เฉลย</span>
+                 <input id="eqChoice1" class="form-control" placeholder="คำตอบที่ถูกต้อง">
+              </div>
+              <input id="eqChoice2" class="form-control mb-2" placeholder="ตัวลวง 1">
+              <input id="eqChoice3" class="form-control mb-2" placeholder="ตัวลวง 2">
+              <input id="eqChoice4" class="form-control mb-2" placeholder="ตัวลวง 3">
+            </div>
+
+            <div id="eqTfArea" class="eq-input-area" style="display:none;">
+              <label class="form-label">เฉลย</label>
+              <select id="eqTfAns" class="form-select">
+                <option value="True">True (ถูก)</option>
+                <option value="False">False (ผิด)</option>
+              </select>
+            </div>
+
+            <div id="eqShortArea" class="eq-input-area" style="display:none;">
+              <label class="form-label">เฉลยคำตอบ (ต้องพิมพ์ให้ตรงเป๊ะ)</label>
+              <input id="eqShortAns" class="form-control" placeholder="คำตอบที่ถูกต้อง">
+            </div>
+
+            <div id="eqDropdownArea" class="eq-input-area" style="display:none;">
+               <div class="alert alert-info py-1"><small>ระบบจะนำตัวเลือกทั้งหมดมาสร้างเป็น Dropdown ให้ผู้เรียนเลือก</small></div>
+               <div class="input-group mb-2">
+                 <span class="input-group-text bg-success text-white">เฉลย</span>
+                 <input id="eqDdCorrect" class="form-control" placeholder="คำตอบที่ถูกต้อง">
+               </div>
+               <label class="form-label mt-2">ตัวลวง (Distractors)</label>
+               <input id="eqDdDist1" class="form-control mb-2" placeholder="ตัวลวง 1">
+               <input id="eqDdDist2" class="form-control mb-2" placeholder="ตัวลวง 2">
+               <input id="eqDdDist3" class="form-control mb-2" placeholder="ตัวลวง 3">
+            </div>
+
+            <div id="eqMatchingArea" class="eq-input-area" style="display:none;">
+               <label class="form-label">จับคู่รายการ (ฝั่งซ้าย - ฝั่งขวา)</label>
+               <div id="eqMatchingPairs">
+                   </div>
+               <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="btnEqAddPair">
+                 <i class="fas fa-plus"></i> เพิ่มคู่
+               </button>
+            </div>
+
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+            <button type="button" class="btn btn-primary" id="eqInsertBtn">แทรกแบบฝึกหัด</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    $('body').append(modalHtml);
+    var quizModal = new bootstrap.Modal(document.getElementById('embeddedQuizModal'));
+    quizModal.show();
+
+    // เริ่มต้นสร้างคู่ Matching แถวแรก
+    addMatchingRow(); 
+
+    // Event: เปลี่ยนประเภทข้อสอบ
+    $('#eqQuizType').off('change').on('change', function(){
+        $('.eq-input-area').hide();
+        var val = $(this).val();
+        if(val == 'mcq') $('#eqMcqArea').show();
+        else if(val == 'tf') $('#eqTfArea').show();
+        else if(val == 'short') $('#eqShortArea').show();
+        else if(val == 'dropdown') $('#eqDropdownArea').show();
+        else if(val == 'matching') $('#eqMatchingArea').show();
+    });
+
+    // Event: เพิ่มคู่ Matching
+    $('#btnEqAddPair').click(function(){
+        addMatchingRow();
+    });
+
+    // Function: สร้างแถว Matching
+    function addMatchingRow() {
+        var html = `
+        <div class="input-group mb-2 matching-row">
+            <input type="text" class="form-control eq-match-left" placeholder="โจทย์ (ซ้าย)">
+            <span class="input-group-text"><i class="fas fa-arrows-alt-h"></i></span>
+            <input type="text" class="form-control eq-match-right" placeholder="คำตอบ (ขวา)">
+            <button class="btn btn-outline-danger btn-remove-pair" type="button"><i class="fas fa-times"></i></button>
+        </div>`;
+        $('#eqMatchingPairs').append(html);
+    }
+
+    // Event: ลบคู่ Matching
+    $(document).on('click', '.btn-remove-pair', function(){
+        if($('.matching-row').length > 1) {
+            $(this).closest('.matching-row').remove();
+        }
+    });
+
+    // Event: กดปุ่มแทรก
+    $('#eqInsertBtn').off('click').on('click', function() {
+        var type = $('#eqQuizType').val();
+        var q = $('#eqQuestion').val().trim();
+        if(!q) { Swal.fire('Warning', 'กรุณาใส่โจทย์', 'warning'); return; }
+
+        var data = { type: type, q: q, ans: '', choices: '' };
+
+        // 1. Logic สำหรับ MCQ
+        if(type === 'mcq'){
+            if(!$('#eqChoice1').val().trim()) { Swal.fire('Warning', 'กรุณาใส่เฉลย', 'warning'); return; }
+            data.ans = $('#eqChoice1').val().trim();
+            var arr = [$('#eqChoice1').val(), $('#eqChoice2').val(), $('#eqChoice3').val(), $('#eqChoice4').val()];
+            data.choices = arr.filter(x => x && x.trim()).join('|');
+        } 
+        // 2. Logic สำหรับ T/F
+        else if(type === 'tf'){
+            data.ans = $('#eqTfAns').val();
+        } 
+        // 3. Logic สำหรับ Short Answer
+        else if(type === 'short'){
+            if(!$('#eqShortAns').val().trim()) { Swal.fire('Warning', 'กรุณาใส่เฉลย', 'warning'); return; }
+            data.ans = $('#eqShortAns').val().trim();
+        }
+        // 4. Logic สำหรับ Dropdown
+        else if(type === 'dropdown'){
+            if(!$('#eqDdCorrect').val().trim()) { Swal.fire('Warning', 'กรุณาใส่เฉลย', 'warning'); return; }
+            data.ans = $('#eqDdCorrect').val().trim();
+            var arr = [data.ans, $('#eqDdDist1').val(), $('#eqDdDist2').val(), $('#eqDdDist3').val()];
+            data.choices = arr.filter(x => x && x.trim()).join('|');
+        }
+        // 5. Logic สำหรับ Matching
+        else if(type === 'matching'){
+            var pairs = [];
+            $('.matching-row').each(function(){
+                var l = $(this).find('.eq-match-left').val().trim();
+                var r = $(this).find('.eq-match-right').val().trim();
+                if(l && r) pairs.push(l + ':' + r);
+            });
+            if(pairs.length < 1) { Swal.fire('Warning', 'กรุณาระบุคู่อย่างน้อย 1 คู่', 'warning'); return; }
+            data.choices = pairs.join('|');
+            data.ans = "matching"; // ตัวบอกเฉยๆ
+        }
+
+        // Encode Data เพื่อฝังใน HTML Attribute
+        var safeQ = data.q.replace(/"/g, '&quot;');
+        var safeAns = data.ans.replace(/"/g, '&quot;');
+        var safeChoices = data.choices.replace(/"/g, '&quot;');
+
+        // *** แก้ไข: เพิ่ม data-q="${safeQ}" เพื่อให้ Server ดึงคำถามได้ถูกต้อง ***
+        var quizHtml = `
+        <div class="card my-3 embedded-quiz border-0 shadow-sm" 
+             data-type="${data.type}" 
+             data-q="${safeQ}"
+             data-ans="${safeAns}" 
+             data-choices="${safeChoices}" 
+             style="border-left: 5px solid #0d6efd !important; background-color: #f8f9fa;">
+             <div class="card-body">
+                <h6 class="card-title fw-bold text-primary"><i class="fas fa-pen-fancy me-2"></i> ${data.q}</h6>
+                <div class="quiz-content-area mt-3">
+                    <em class="text-muted"><i class="fas fa-sync fa-spin"></i> กำลังโหลดแบบฝึกหัด...</em>
+                </div>
+             </div>
+        </div>
+        <p><br></p>`;
+
+        // 2. *** หัวใจสำคัญ: คืนตำแหน่งเคอร์เซอร์ แล้ววาง HTML ***
+        context.invoke('editor.restoreRange');
+        context.invoke('editor.focus');
+        context.invoke('editor.pasteHTML', quizHtml);
+        
+        quizModal.hide();
+    });
+
+    $('#embeddedQuizModal').on('hidden.bs.modal', function() {
+        $(this).remove();
+    });
+}
+
+// ฟังก์ชันรันแบบฝึกหัดในเนื้อหา (Embedded Quizzes) - Safe Syntax
+function runEmbeddedQuizzes() {
+  $('.embedded-quiz').each(function() {
+    var $card = $(this);
+    var type = $card.data('type');
+    var correct = String($card.data('ans') || '').trim();
+    var choicesStr = decodeURIComponent(String($card.data('choices') || '')); 
+    if(!choicesStr) choicesStr = String($card.data('choices') || '');
+    
+    // ดึงโจทย์จาก data-q (หรือจาก HTML ถ้าไม่มี)
+    var qText = String($card.data('q') || '');
+    // ถ้า data-q ว่าง ให้ลองหาจาก h6 ใน card-body (กรณีข้อมูลเก่า)
+    if(qText === '') {
+        var $legacyTitle = $card.find('.card-title');
+        if($legacyTitle.length > 0) qText = $legacyTitle.text().trim();
+    }
+
+    var $body = $card.find('.quiz-content-area');
+    var uniqueId = 'eq_' + Math.random().toString(36).substr(2, 9);
+    var html = '';
+    
+    // --- 1. Logic Inline Input (Short & Dropdown) ---
+    var isInline = false;
+    var partIndex = 0;
+
+    if (type === 'short' && qText.includes('___')) {
+        qText = qText.replace(/___/g, function() {
+            var inputHtml = '<input type="text" class="form-control d-inline-block text-primary fw-bold mx-1 text-center quiz-inline-input" data-idx="'+partIndex+'" style="width: 150px; display: inline-block; border: none; border-bottom: 2px solid #0d6efd; border-radius: 0; padding: 0 5px; background: transparent;" autocomplete="off">';
+            partIndex++;
+            return inputHtml;
+        });
+        isInline = true;
+    } 
+    else if (type === 'dropdown' && qText.includes('___')) {
+        // เตรียมตัวเลือก
+        var ansParts = correct.split('|');
+        var choiceParts = choicesStr.split('|');
+        var allOptions = [...new Set([...ansParts, ...choiceParts])].filter(x => x && x.trim() !== "");
+        allOptions.sort(function() { return Math.random() - 0.5; });
+        
+        var optsHtml = '<option value="" selected disabled>Select...</option>';
+        for(var d=0; d<allOptions.length; d++) {
+            optsHtml += '<option value="'+allOptions[d]+'">'+allOptions[d]+'</option>';
+        }
+
+        qText = qText.replace(/___/g, function() {
+            var selectHtml = '<select class="form-select d-inline-block w-auto mx-1 border-primary text-primary fw-bold quiz-inline-select" data-idx="'+partIndex+'" style="display: inline-block; padding-top: 2px; padding-bottom: 2px; min-width: 120px;">' + optsHtml + '</select>';
+            partIndex++;
+            return selectHtml;
+        });
+        isInline = true;
+    }
+
+    // อัปเดตโจทย์ใน Card (ถ้ามีการแปลง Inline)
+    if(isInline) {
+        $card.find('.card-title').html('<i class="fas fa-pen-fancy me-2"></i> ' + qText);
+    }
+
+    // --- 2. Render ตัวเลือกด้านล่าง (กรณีไม่ใช่ Inline หรือเป็น MCQ/TF/Matching) ---
+    
+    // MCQ
+    if(type === 'mcq') {
+       var list = choicesStr.split('|');
+       list.sort(function() { return Math.random() - 0.5; });
+       for(var i=0; i<list.length; i++) {
+          var val = list[i];
+          html += '<div class="form-check">' +
+                     '<input class="form-check-input" type="radio" name="' + uniqueId + '" value="' + val + '">' +
+                     '<label class="form-check-label">' + val + '</label>' +
+                   '</div>';
+       }
+       html += '<button class="btn btn-sm btn-primary mt-2 btn-check-quiz">ตรวจคำตอบ</button>';
+    } 
+    // True/False
+    else if(type === 'tf') {
+       html += '<div class="form-check"><input class="form-check-input" type="radio" name="' + uniqueId + '" value="True"><label class="form-check-label">True</label></div>';
+       html += '<div class="form-check"><input class="form-check-input" type="radio" name="' + uniqueId + '" value="False"><label class="form-check-label">False</label></div>';
+       html += '<button class="btn btn-sm btn-primary mt-2 btn-check-quiz">ตรวจคำตอบ</button>';
+    }
+    // Short Answer (แบบเดิม - ถ้าไม่มี Inline)
+    else if(type === 'short') {
+       if(!isInline) {
+           html += '<input type="text" class="form-control w-75 quiz-input mb-2" placeholder="ตอบ..." autocomplete="off">';
+       }
+       html += '<button class="btn btn-sm btn-primary btn-check-quiz">ตรวจคำตอบ</button>';
+    }
+    // Dropdown (แบบเดิม - ถ้าไม่มี Inline)
+    else if(type === 'dropdown') {
+       if(!isInline) {
+           var list = choicesStr.split('|');
+           list.sort(function() { return Math.random() - 0.5; });
+           var options = '';
+           for(var j=0; j<list.length; j++) options += '<option value="' + list[j] + '">' + list[j] + '</option>';
+           html += '<div class="d-flex align-items-center gap-2"><select class="form-select w-auto quiz-input"><option value="" disabled selected>-- เลือก --</option>' + options + '</select></div>';
+       }
+       html += '<button class="btn btn-sm btn-primary mt-2 btn-check-quiz">ตรวจ</button>';
+    }
+    // Matching
+    else if(type === 'matching') {
+        var pairsRaw = choicesStr.split('|');
+        var pairs = [];
+        var rightSide = [];
+        for(var k=0; k<pairsRaw.length; k++) {
+            var parts = pairsRaw[k].split(':');
+            if(parts.length >= 2) {
+                pairs.push({l: parts[0], r: parts[1]});
+                rightSide.push(parts[1]);
+            }
+        }
+        rightSide.sort(function() { return Math.random() - 0.5; });
+        html += '<div class="table-responsive"><table class="table table-sm table-borderless">';
+        for(var l=0; l<pairs.length; l++) {
+            var p = pairs[l];
+            var opts = '';
+            for(var m=0; m<rightSide.length; m++) opts += '<option value="' + rightSide[m] + '">' + rightSide[m] + '</option>';
+            html += '<tr><td class="border rounded px-2">' + p.l + '</td><td><select class="form-select form-select-sm quiz-match-select" data-correct="' + p.r + '"><option value="">-</option>' + opts + '</select></td></tr>';
+        }
+        html += '</table></div><button class="btn btn-sm btn-primary mt-2 btn-check-quiz">ตรวจ</button>';
+    }
+
+    html += '<div class="quiz-feedback mt-2 fw-bold"></div>';
+    $body.html(html);
+
+    // --- 3. Logic ตรวจคำตอบ (Updated) ---
+    $body.find('.btn-check-quiz').click(function(e){
+        e.preventDefault();
+        var isCorrect = false;
+        var $fb = $body.find('.quiz-feedback');
+        
+        // A. ตรวจ MCQ / TF
+        if(type === 'mcq' || type === 'tf') {
+            var val = $body.find('input:checked').val();
+            if(val && val.trim().toLowerCase() == correct.toLowerCase()) isCorrect = true;
+        } 
+        // B. ตรวจ Inline Short / Dropdown (Multi-Part)
+        else if(isInline) {
+            var correctParts = correct.split('|');
+            var userInputs = $card.find('.quiz-inline-input, .quiz-inline-select'); // หา input ทั้งหมดใน card นี้
+            
+            if(correctParts.length === userInputs.length) {
+                var allRight = true;
+                userInputs.each(function(index) {
+                    var uVal = $(this).val() || '';
+                    var cVal = correctParts[index] || '';
+                    if(uVal.trim().toLowerCase() !== cVal.trim().toLowerCase()) {
+                        allRight = false;
+                        $(this).addClass('is-invalid').removeClass('is-valid'); // Feedback สีแดง
+                    } else {
+                        $(this).addClass('is-valid').removeClass('is-invalid'); // Feedback สีเขียว
+                    }
+                });
+                isCorrect = allRight;
+            }
+        }
+        // C. ตรวจ Short / Dropdown (แบบเดิม Single)
+        else if(type === 'short' || type === 'dropdown') {
+            var val = $body.find('.quiz-input').val();
+            if(val && val.trim().toLowerCase() === correct.toLowerCase()) isCorrect = true;
+        } 
+        // D. ตรวจ Matching
+        else if(type === 'matching') {
+            var allRight = true;
+            $body.find('.quiz-match-select').each(function(){
+                if($(this).val() !== $(this).data('correct')) {
+                    allRight = false;
+                    $(this).addClass('is-invalid');
+                } else {
+                    $(this).removeClass('is-invalid').addClass('is-valid');
+                }
+            });
+            isCorrect = allRight;
+        }
+
+        if(isCorrect) $fb.html('<span class="text-success"><i class="fas fa-check-circle"></i> ถูกต้อง! เก่งมาก</span>');
+        else $fb.html('<span class="text-danger"><i class="fas fa-times-circle"></i> ยังไม่ถูก ลองใหม่นะ</span>');
+    });
+  });
+}
+
+// ========== Certificate ==========
+function loadThaiFonts() {
+  return new Promise(function(resolve, reject) {
+    if (pdfMake.vfs && pdfMake.vfs['Sarabun-Regular.ttf']) {
+      resolve();
+      return;
+    }
+    pdfMake.fonts = {
+      Sarabun: {
+        normal: 'Sarabun-Regular.ttf',
+        bold: 'Sarabun-Bold.ttf',
+        italics: 'Sarabun-Regular.ttf',
+        bolditalics: 'Sarabun-Bold.ttf'
+      }
+    };
+    var fontURLs = {
+      'Sarabun-Regular.ttf': 'https://cdn.jsdelivr.net/npm/@fontsource/sarabun@4.5.0/files/sarabun-thai-400-normal.woff',
+      'Sarabun-Bold.ttf': 'https://cdn.jsdelivr.net/npm/@fontsource/sarabun@4.5.0/files/sarabun-thai-700-normal.woff'
+    };
+    var loadFontFile = function(url) {
+      return fetch(url).then(function(response) {
+        return response.blob();
+      }).then(function(blob) {
+        return new Promise(function(resolve) {
+          var reader = new FileReader();
+          reader.onloadend = function() { resolve(reader.result.split(',')[1]); };
+          reader.readAsDataURL(blob);
+        });
+      });
+    };
+    Promise.all([
+      loadFontFile(fontURLs['Sarabun-Regular.ttf']),
+      loadFontFile(fontURLs['Sarabun-Bold.ttf'])
+    ]).then(function(results) {
+      pdfMake.vfs = pdfMake.vfs || {};
+      pdfMake.vfs['Sarabun-Regular.ttf'] = results[0];
+      pdfMake.vfs['Sarabun-Bold.ttf'] = results[1];
+      resolve();
+    }).catch(reject);
+  });
+}
+
+// ฟังก์ชันเรียกสร้างเกียรติบัตร (ฝั่งนักเรียน)
+function generateCert() {
+  Swal.fire({
+    title: 'กำลังจัดเตรียมเกียรติบัตร...',
+    html: 'กรุณารอสักครู่',
+    allowOutsideClick: false,
+    didOpen: function() { Swal.showLoading(); }
+  });
+
+  // 1. ดึงเลขที่เกียรติบัตร
+  google.script.run.withSuccessHandler(function(res) {
+    if (res && res.status === 'ok') {
+      
+      // 2. ดึงภาพพื้นหลัง + ลายเซ็น
+      google.script.run.withSuccessHandler(function(bgRes) {
+         if(bgRes.status === 'ok') {
+             // 3. โหลดฟอนต์และสร้าง PDF (ส่ง signBase64, signMime เพิ่มเข้าไป)
+             loadThaiFonts().then(function() {
+                createPdf(res.fullName, res.certNo, bgRes.base64, bgRes.mime, bgRes.signBase64, bgRes.signMime);
+             }).catch(function(error) {
+                console.error(error);
+                Swal.fire('Error', 'ไม่สามารถโหลดฟอนต์ได้', 'error');
+             });
+         } else {
+             Swal.fire('Error', 'ไม่สามารถโหลดภาพพื้นหลังได้: ' + bgRes.message, 'error');
+         }
+      }).getCertBackgroundData();
+
+    } else {
+      Swal.close();
+      Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถดึงข้อมูลเกียรติบัตรได้', 'error');
+    }
+  }).getMyCertNumber(currentUser.username);
+}
+
+// ฟังก์ชันดาวน์โหลดเกียรติบัตร (ฝั่งแอดมิน)
+function adminDownloadCert(name, certNo) {
+  Swal.fire({
+      title: 'กำลังสร้างไฟล์...', 
+      html: 'กำลังโหลดภาพพื้นหลัง...',
+      allowOutsideClick: false, 
+      didOpen: function() { Swal.showLoading(); }
+  });
+
+  google.script.run.withSuccessHandler(function(bgRes) {
+      if(bgRes.status === 'ok') {
+          loadThaiFonts().then(function() {
+            // ส่ง signBase64, signMime เพิ่มเข้าไป
+            createPdf(name, certNo, bgRes.base64, bgRes.mime, bgRes.signBase64, bgRes.signMime);
+          }).catch(function(e) {
+            Swal.fire('Error', 'ไม่สามารถสร้างไฟล์ได้ (Font Error)', 'error');
+          });
+      } else {
+         Swal.fire('Error', 'ไม่สามารถโหลดภาพพื้นหลังได้', 'error');
+      }
+  }).getCertBackgroundData();
+}
+
+// ฟังก์ชันสร้าง PDF (แก้ไขเพิ่ม background)
+function createPdf(name, certNo, bgBase64, bgMime, signBase64, signMime) {
+  var today = new Date();
+  var thaiMonth = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+  var dateString = today.getDate() + " " + thaiMonth[today.getMonth()] + " พ.ศ. " + (today.getFullYear() + 543);
+  
+  // เตรียม Image Data URL พื้นหลัง
+  var bgImage = 'data:' + (bgMime || 'image/jpeg') + ';base64,' + bgBase64;
+  
+  // เตรียม Image Data URL ลายเซ็น (ถ้ามี)
+  var signImage = null;
+  if(signBase64) {
+      signImage = 'data:' + (signMime || 'image/png') + ';base64,' + signBase64;
+  }
+
+  var docDefinition = {
+    pageSize: 'A4',
+    pageOrientation: 'landscape',
+    // ตั้งค่าพื้นหลัง
+    background: function(currentPage, pageSize) {
+        return {
+            image: bgImage,
+            width: 842,
+            height: 595
+        };
+    },
+    content: [
+      { text: 'โรงเรียนตักศิลาวิทยาลัย', style: 'header', margin: [0, 80, 0, 10] },
+      { text: 'กลุ่มพัฒนาคุณภาพและมาตรฐานการศึกษาตักศิลา', style: 'header', margin: [0, 0, 0, 10] },
+      { text: 'สำนักงานเขตพื้นที่การศึกษาประถมศึกษาตักศิลา เขต 8', style: 'header', margin: [0, 0, 0, 10] },
+      { text: 'ขอมอบวุฒิบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า', style: 'header', margin: [0, 50, 0, 10] },
+      { text: name, style: 'name', margin: [0, 10, 0, 10] },
+      { text: 'ได้ผ่านการอบรมพัฒนาการสร้างบทเรียนออนไลน์ ด้วยระบบ e-Learning', style: 'subheader', margin: [0, 5, 0, 5] },
+      { text: 'หลักสูตรการสร้างบทเรียนออนไลน์ด้วย Google Apps Script', style: 'subheader', margin: [0, 0, 0, 20] },
+      { text: 'ให้ไว้ ณ วันที่ ' + dateString, style: 'text', margin: [0, 0, 0, 20] },
+      {
+        columns: [
+          { width: '*', text: '' },
+          { 
+            width: 'auto', 
+            stack: [
+              // --- ส่วนแสดงลายเซ็น ---
+              signImage ? {
+                  image: signImage,
+                  width: 100, // ปรับขนาดลายเซ็นตามต้องการ (เช่น 100, 120, 150)
+                  alignment: 'center',
+                  margin: [0, 0, 0, -10] // ขยับลายเซ็นขึ้นลง (ติดลบคือขยับลงไปทับชื่อ หรือลดช่องว่าง)
+              } : {}, 
+              // --------------------
+              { text: '(นายสมพงษ์ คนขยันหมั่นศึกษา)', style: 'sign', margin: [0, 10, 0, 0] },
+              { text: 'ผู้อำนวยการโรงเรียนตักศิลาวิทยาลัย', style: 'sign_pos' }
+            ]
+          },
+          { width: '*', text: '' }
+        ]
+      },
+      // เลขที่เกียรติบัตร
+      { text: 'เลขที่: ' + certNo, style: 'small', absolutePosition: { x: 680, y: 50 } }
+    ],
+    styles: {
+      header: { fontSize: 18, alignment: 'center', color: '#444' },
+      name: { fontSize: 30, bold: true, alignment: 'center', color: '#1a5490' },
+      subheader: { fontSize: 16, alignment: 'center', color: '#666' },
+      text: { fontSize: 14, alignment: 'center' },
+      sign: { fontSize: 16, alignment: 'center' }, // ลบ margin เดิมออก เพราะคุมใน stack แล้ว
+      sign_pos: { fontSize: 14, alignment: 'center' },
+      small: { fontSize: 12, color: '#aaa' }
+    },
+    defaultStyle: { font: 'Sarabun' }
+  };
+
+  try {
+    const pdfDocGenerator = pdfMake.createPdf(docDefinition);
+    pdfDocGenerator.getBlob(function(blob) {
+       var blobURL = URL.createObjectURL(blob);
+       Swal.close();
+       
+       Swal.fire({
+         icon: 'success',
+         title: 'สร้างเกียรติบัตรสำเร็จ',
+         text: 'กรุณากดปุ่มด้านล่างเพื่อเปิดดูตัวอย่าง (Preview)',
+         showCancelButton: true,
+         confirmButtonText: '<i class="fas fa-eye"></i> เปิดดูเกียรติบัตร',
+         cancelButtonText: 'ปิด',
+         confirmButtonColor: '#0d6efd',
+         cancelButtonColor: '#6c757d'
+       }).then((result) => {
+         if (result.isConfirmed) {
+            window.open(blobURL, '_blank');
+         }
+       });
+    });
+  } catch (e) {
+    console.error(e);
+    Swal.fire('Error', 'เกิดข้อผิดพลาดในการสร้างไฟล์ PDF', 'error');
+  }
+}
+
+// ========== Edit Functions ==========
+function startEdit(type, id) {
+  if (type === 'exam') {
+    Swal.fire({title: 'กำลังโหลด...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+    google.script.run.withSuccessHandler(function(questions){
+      Swal.close();
+      var options = {};
+      for(var i = 0; i < questions.length; i++) {
+        options[questions[i].id] = questions[i].question;
+      }
+      Swal.fire({
+        title: 'เลือกข้อสอบที่ต้องการแก้ไข',
+        input: 'select',
+        inputOptions: options,
+        inputPlaceholder: 'เลือกข้อสอบ...',
+        showCancelButton: true,
+      }).then(function(result) {
+        if (result.isConfirmed && result.value) {
+          loadDataToModal('exam', result.value);
+        }
+      });
+    }).getExamQuestionsInGroup(id);
+  } else {
+    loadDataToModal(type, id);
+  }
+}
+
+function loadDataToModal(type, id) {
+  Swal.fire({title: 'กำลังดึงข้อมูล...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); }});
+  google.script.run.withSuccessHandler(function(data){
+    Swal.close();
+    if(data) {
+      if(type === 'user') {
+        $('#edit_id_user').val(data.id);
+        $('#reg_prefix').val(data.prefix);
+        $('#reg_fname').val(data.fname);
+        $('#reg_lname').val(data.lname);
+        $('#reg_user').val(data.user);
+        $('#reg_pass').val(data.pass);
+        $('#reg_status').val(data.status);
+        $('#regModal .modal-title').html('<i class="fas fa-edit"></i> แก้ไขข้อมูลสมาชิก');
+        $('#regModal').modal('show');
+      } else if(type === 'lesson') {
+        $('#edit_id_lesson').val(data.id);
+        $('select[name="content_unit"]').val(data.unit);
+        $('input[name="content_topic"]').val(data.topic);
+        $('input[name="content_link"]').val(data.link);
+        $('#summernote').summernote('code', data.content);
+        $('#contentModal .modal-title').html('<i class="fas fa-edit"></i> แก้ไขบทเรียน');
+        $('#contentModal').modal('show');
+      } else if(type === 'exam') {
+        $('#edit_id_exam').val(data.id);
+        $('select[name="exam_unit"]').val(data.unit);
+        $('select[name="exam_cat"]').val(data.cat);
+        $('#examSummernote').summernote('code', data.question);
+        $('#examTypeSelector').val(data.type).trigger('change');
+        if(data.type === 'mcq') {
+          var choices = (data.choices || '').split('|');
+          $('input[name="choice_1"]').val(choices[0] || '');
+          $('input[name="choice_2"]').val(choices[1] || '');
+          $('input[name="choice_3"]').val(choices[2] || '');
+          $('input[name="choice_4"]').val(choices[3] || '');
+          for(var i=1; i<=4; i++){
+            var choiceVal = $('input[name="choice_'+i+'"]').val();
+            if(String(choiceVal).trim() === String(data.answer).trim()){
+              $('input[name="correct_idx"][value="'+i+'"]').prop('checked', true);
+            }
+          }
+        } else if (data.type === 'tf') {
+          var ansStr = String(data.answer || '').trim();
+          var val = ansStr.charAt(0).toUpperCase() + ansStr.slice(1).toLowerCase();
+          $('#tfAnswerSelect').val(val);
+        } else if (data.type === 'short') {
+          $('#shortAnswerInput').val(data.answer || '');
+        } else if (data.type === 'dropdown') {
+          var ddChoices = (data.choices || '').split('|');
+          var validDdChoices = [];
+          for(var dc = 0; dc < ddChoices.length; dc++) {
+            if(ddChoices[dc]) validDdChoices.push(ddChoices[dc]);
+          }
+          var answer = data.answer || '';
+          $('#ddAnswerInput').val(answer);
+          var distractors = [];
+          for(var di = 0; di < validDdChoices.length; di++) {
+            if(validDdChoices[di] !== answer) distractors.push(validDdChoices[di]);
+          }
+          $('#dd_distractor_1').val(distractors[0] || '');
+          $('#dd_distractor_2').val(distractors[1] || '');
+          $('#dd_distractor_3').val(distractors[2] || '');
+        } else if (data.type === 'matching') {
+          var matchPairs = (data.choices || '').split('|');
+          var validMatchPairs = [];
+          for(var mp = 0; mp < matchPairs.length; mp++) {
+            if(matchPairs[mp].indexOf(':') !== -1) validMatchPairs.push(matchPairs[mp]);
+          }
+          $('.matching-left').each(function(i) {
+            if(validMatchPairs[i]) {
+              var parts = validMatchPairs[i].split(':');
+              $(this).val(parts[0] || '');
+              $('.matching-right').eq(i).val(parts[1] || '');
+            } else {
+              $(this).val('');
+              $('.matching-right').eq(i).val('');
+            }
+          });
+        }
+        $('#finalAnswer').val(data.answer || '');
+        $('#examModal .modal-title').html('<i class="fas fa-edit"></i> แก้ไขข้อสอบ');
+        $('#examModal').modal('show');
+      }
+    } else {
+      Swal.fire('Error', 'ไม่พบข้อมูล', 'error');
+    }
+  }).getDataForEdit(type, id);
+}
+
+// ========== Utilities ==========
+function loadUnitDropdowns() {
+  google.script.run.withSuccessHandler(function(units) {
+    var options = '<option value="" disabled selected>-- กรุณาเลือกบทเรียน --</option>';
+    for(var i = 0; i < units.length; i++) {
+      options += '<option value="' + units[i] + '">' + units[i] + '</option>';
+    }
+    $('#examUnitSelect').html(options);
+    $('#contentUnitSelect').html(options);
+  }).getUnitList();
+}
+
+
+// โหลด Google Charts API
+  google.charts.load('current', {'packages': ['corechart']});
+  // กำหนดให้เรียกฟังก์ชัน drawCharts เมื่อ Charts API โหลดเสร็จ
+  google.charts.setOnLoadCallback(drawCharts);
+
+  function drawCharts() {
+    // 1. แสดงสถานะว่ากำลังโหลด
+    document.getElementById('pieChartStatus').innerHTML = '<div class="text-center text-muted p-5">กำลังดึงข้อมูลและวาดกราฟ...</div>';
+    document.getElementById('barChartCertificate').innerHTML = '<div class="text-center text-muted p-5">กำลังดึงข้อมูลและวาดกราฟ...</div>';
+
+    // 2. เรียกใช้ฟังก์ชัน Apps Script เพื่อดึงข้อมูล
+    google.script.run
+      .withSuccessHandler(renderDashboard)
+      .withFailureHandler(handleError)
+      .getDashboardData();
+  }
+
+  /**
+   * ฟังก์ชันที่จะถูกเรียกเมื่อดึงข้อมูลสำเร็จ
+   * @param {object} data - ข้อมูลที่ส่งกลับมาจาก Apps Script (pieChartData, barChartData)
+   */
+  function renderDashboard(data) {
+    if (!data) {
+      handleError(new Error("ไม่พบข้อมูล Dashboard จาก Apps Script"));
+      return;
+    }
+
+    // ----------------------------------------------------
+    // กราฟที่ 1: Pie Chart (ข้อมูลผู้ลงทะเบียนแยกตามสถานภาพ)
+    // ----------------------------------------------------
+    const pieData = google.visualization.arrayToDataTable(data.pieChartData);
+    
+    const pieOptions = {
+      title: 'ผู้ลงทะเบียนแยกตามสถานภาพ (รวม ' + data.totalRegistered + ' คน)',
+      is3D: true,
+      legend: { position: 'right', alignment: 'center', textStyle: { fontSize: 12 } }, // ปรับขนาดตัวอักษรของ Legend
+      // *** ปรับ chartArea ให้ยืดหยุ่นมากขึ้น ***
+      chartArea: { width: '90%', height: '85%' }, 
+      sliceVisibilityThreshold: 0, 
+      tooltip: { text: 'percentage' },
+      colors: ['#007bff', '#28a745', '#ffc107', '#dc3545', '#17a2b8']
+    };
+
+    const pieChart = new google.visualization.PieChart(document.getElementById('pieChartStatus'));
+    pieChart.draw(pieData, pieOptions);
+
+    // ----------------------------------------------------
+    // กราฟที่ 2: Bar Chart (เปรียบเทียบผู้ลงทะเบียนกับผู้ได้รับเกียรติบัตร)
+    // ----------------------------------------------------
+    const barData = google.visualization.arrayToDataTable(data.barChartData);
+
+    const barOptions = {
+      title: 'เปรียบเทียบจำนวนผู้ลงทะเบียนและผู้ได้รับเกียรติบัตร',
+      legend: { position: 'none' },
+      // *** ปรับ chartArea ให้ยืดหยุ่นมากขึ้น ***
+      chartArea: { width: '85%', height: '70%' }, 
+      
+      hAxis: { 
+          title: '',
+          textStyle: { fontSize: 12 } // ปรับขนาดตัวอักษร H-Axis ลง
+      },
+      vAxis: { 
+          title: 'จำนวน (คน)',
+          minValue: 0,
+          maxValue: data.totalRegistered + 2, 
+          gridlines: { count: 5 }
+      },
+      
+      annotations: {
+          alwaysOutside: false,
+          textStyle: {
+              fontSize: 16, // ปรับขนาดตัวเลขกำกับลงเล็กน้อย
+              color: '#fff', 
+              auraColor: 'none'
+          },
+          position: 'center' // 'top'=เลขอยู่บนกราฟ 'center'=เลขอยู่ในกราฟ 
+      },
+      
+      // *** ลบบรรทัดนี้ออกไป เพื่อให้สีมาจาก Data Table โดยตรง ***
+      // colors: ['#007bff', '#dc3545'] 
+    };
+
+    const barChart = new google.visualization.ColumnChart(document.getElementById('barChartCertificate'));
+    barChart.draw(barData, barOptions);
+  }
+
+  window.addEventListener('resize', function() {
+    setTimeout(drawCharts, 300); 
+  });
+
+  function handleError(error) {
+    console.error("Dashboard Error:", error);
+    document.getElementById('pieChartStatus').innerHTML = '<div class="text-center text-danger p-5">เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + error.message + '</div>';
+    document.getElementById('barChartCertificate').innerHTML = '<div class="text-center text-danger p-5">เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + error.message + '</div>';
+  }
+</script>
