@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <base target="_top">
+  
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.68/pdfmake.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.68/vfs_fonts.js"></script>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css"> 
+
+  <link href="https://cdn.jsdelivr.net/npm/summernote@0.8.18/dist/summernote-lite.min.css" rel="stylesheet">
+
+  <?!= include('css'); ?>
+  
+  <style>
+    .hero-section {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 40px 0;
+      min-height: 40vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .stat-card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      color: #333;
+    }
+    .stat-number {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: #0d6efd;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm sticky-top py-2">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center" href="#">
+        <img src="https://img2.pic.in.th/pic/-3DGlow.png" alt="Logo" width="60" height="60" class="d-inline-block align-text-top me-3">
+        <div class="lh-1">
+          <div class="navbar-title-main">การสร้างบทเรียนออนไลน์(e-Learning)</div>
+          <div class="navbar-title-sub">โรงเรียนตักศิลาวิทยาลัย</div>
+          <div class="navbar-title-sub-2">สำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน</div>
+          <div class="navbar-title-sub-2">กระทรวงศึกษาธิการ</div>
+        </div>
+      </a>
+      
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarContent">
+        <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-center" id="authMenu">
+          <!-- ปุ่ม Sign in / Register จะถูกสร้างโดย JavaScript -->
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ==================== GUEST LANDING PAGE ==================== -->
+  <div id="guestLandingPage" class="welcome-page">
+    <div class="hero-section">
+      <div class="container">
+        <img src="https://img2.pic.in.th/pic/-3DGlow.png" alt="Logo" class="welcome-logo mb-4" height="75">
+        
+        <h1 class="fw-bold mb-2 display-4"><i class="fas fa-book-open"></i> หลักสูตรการสร้างบทเรียนออนไลน์</h1>
+        <h2 class="fw-bold mb-4">ด้วย Google Apps Script</h2>
+        <p class="lead mb-5 text-warning">
+          หลักสูตรนี้เหมาะสำหรับผู้บริหาร ครู บุคลากรทางการศึกษาและบุคคลทั่วไป<br>
+          พร้อมรับเกียรติบัตรเมื่อมีผลการทดสอบผ่านเกณฑ์ร้อยละ 70 ขึ้นไป
+        </p>
+        <div>
+          <button type="button" class="btn btn-light text-primary btn-lg px-4 me-2 rounded-pill fw-bold" data-bs-toggle="modal" data-bs-target="#loginModal">
+            <i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ
+          </button>
+          <button type="button" class="btn btn-success btn-lg px-4 rounded-pill fw-bold" data-bs-toggle="modal" data-bs-target="#regModal">
+            <i class="fas fa-user-plus"></i> ลงทะเบียน
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- สถิติผู้เข้าใช้งาน -->
+    <div class="container position-relative" style="margin-top: -50px; margin-bottom: 50px;">
+      <div class="row g-4 justify-content-center">
+        <div class="col-md-4">
+          <div class="stat-card">
+            <div class="stat-number" id="cnt_daily">0</div>
+            <div class="text-muted">ผู้เข้าใช้วันนี้</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stat-card">
+            <div class="stat-number" id="cnt_month">0</div>
+            <div class="text-muted">ผู้เข้าใช้เดือนนี้</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stat-card">
+            <div class="stat-number" id="cnt_total">0</div>
+            <div class="text-muted">ผู้เข้าใช้ทั้งหมด</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+        <!-- *** แดชบอร์ดข้อมูลผู้ลงทะเบียนและผู้ได้รับเกียรติบัตร *** -->
+    <div id="guestDashboard" class="container my-5">
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <div class="dashboard-card">
+            <h4 class="card-title fw-bold text-primary mb-3"><i class="fas fa-chart-pie"></i>
+              ข้อมูลผู้ลงทะเบียนแยกตามสถานภาพ</h4>
+            <div id="pieChartStatus" style="width: 100%; height: 350px;">
+              <div class="text-center text-muted p-5">กำลังโหลดกราฟ...</div>
+            </div>
+          </div>
+        </div>    
+        <div class="col-lg-6">
+          <div class="dashboard-card">
+            <h4 class="card-title fw-bold text-primary mb-3"><i class="fas fa-chart-bar"></i>
+              เปรียบเทียบผู้ลงทะเบียนกับผู้ได้รับเกียรติบัตร</h4>
+            <div id="barChartCertificate" style="width: 100%; height: 350px;">
+              <div class="text-center text-muted p-5">กำลังโหลดกราฟ...</div>
+            </div>
+          </div>
+        </div>    
+      </div>
+    </div>
+
+
+
+  <!-- ==================== END GUEST LANDING PAGE ==================== -->
+
+  <!-- ==================== MAIN APP SECTION (หลัง Login) ==================== -->
+  <div id="mainAppSection" style="display:none;">
+    
+    <!-- Admin Panel -->
+    <div id="adminPanel" class="bg-dark text-white p-3 mb-3 shadow sticky-top" style="display:none; top: 0px; z-index: 1000;">
+      <div class="container d-flex justify-content-between align-items-center">
+        <h5 class="m-0"><i class="fas fa-user-shield text-warning"></i> ผู้ดูแลระบบ</h5>
+        <div class="btn-group">
+          <button type="button" class="btn btn-outline-light btn-sm" data-bs-toggle="modal" data-bs-target="#examModal">
+            <i class="fas fa-file-signature"></i> สร้างข้อสอบ
+          </button>
+          <button type="button" class="btn btn-outline-light btn-sm" data-bs-toggle="modal" data-bs-target="#contentModal">
+             <i class="fas fa-book-open"></i> สร้างเนื้อหา
+          </button>
+          <button type="button" class="btn btn-outline-light btn-sm" data-bs-toggle="modal" data-bs-target="#certSettingsModal">
+            <i class="fas fa-certificate"></i> เลขที่เกียรติบัตร
+          </button>
+          <button type="button" class="btn btn-warning btn-sm text-dark fw-bold" onclick="scrollToId('adminUsersTable')">
+            <i class="fas fa-users-cog"></i> จัดการผู้ใช้
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div id="dashboardSection" class="container-fluid mt-3 mb-2" style="display:none;">
+      <div class="alert alert-light border shadow-sm ">
+        <div class="card-header bg-info text-white text-center fw-bold py-3 border rounded">
+          <h5 class="text-white"><i class="fas fa-chart-line"></i> ภาพรวมการเรียนของคุณ (Dashboard)</h5>
+        </div>
+        <hr>
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-3" id="dashboardCards"></div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="container-fluid mt-4 mb-5">
+      <div class="row">
+        
+        <!-- Student Sidebar -->
+        <div class="col-md-3 mb-4" id="studentSidebarArea">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-primary text-white fw-bold">
+              <i class="fas fa-book-reader me-2"></i> บทเรียน
+            </div>
+            <div class="card-body p-0">
+              <div class="accordion" id="lessonAccordion">
+                <div class="text-center p-3 text-muted">กำลังโหลดบทเรียน...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Student Content Area -->
+        <div class="col-md-9" id="studentContentArea">
+          <div class="card border-0 shadow-sm" style="min-height: 600px;">
+            <div class="card-body" id="contentDisplay">
+              <div class="text-center mt-5">
+                 <i class="fas fa-hand-point-left fa-3x text-muted mb-3"></i>
+                 <h3>เลือกบทเรียนทางซ้ายมือ</h3>
+                 <p>เพื่อเริ่มต้นการเรียนรู้</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Admin Content Area -->
+      <div class="col-12" id="adminContentArea" style="display:none;">
+            
+            <!-- ตารางข้อสอบ -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white fw-bold py-3">
+                    <i class="fas fa-file-signature text-white me-2"></i> จัดการข้อสอบ
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table id="tableExams" class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>No.</th>
+                                    <th>Unit</th>
+                                    <th>Test Type</th>
+                                    <th>Question Type</th>
+                                    <th class="text-center">จำนวน(ข้อ)</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tblExams">
+                                <tr><td colspan="6" class="text-center p-4">กำลังโหลดข้อมูล...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- ตารางบทเรียน -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white fw-bold py-3">
+                    <i class="fas fa-laptop text-white me-2"></i> จัดการบทเรียน
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table id="tableLessons" class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>No.</th>
+                                    <th>Unit</th>
+                                    <th>Topic</th>
+                                    <th class="text-center" style="width: 150px;">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tblLessons">
+                                <tr><td colspan="4" class="text-center p-4">กำลังโหลดข้อมูล...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- ตารางผู้ใช้ -->
+            <div class="card shadow-sm border-0" id="adminUsersTable">
+                <div class="card-header bg-primary text-white fw-bold py-3">
+                    <i class="fas fa-users text-white me-2"></i> จัดการผู้ใช้
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table id="tableUsers" class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>No.</th>
+                                    <th>Name</th>
+                                    <th>Username</th>
+                                    <th>Password</th>
+                                    <th class="text-center" style="width: 150px;">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tblUsers">
+                                <tr><td colspan="5" class="text-center p-4">กำลังโหลดข้อมูล...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- ตารางเกียรติบัตร (Admin) -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-success text-white fw-bold py-3">
+                    <i class="fas fa-certificate text-white me-2"></i> ทำเนียบผู้ได้รับเกียรติบัตร (Admin View)
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table id="tableCertsAdmin" class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>No.</th>
+                                    <th>ชื่อ-สกุล</th>
+                                    <th>เลขที่เกียรติบัตร</th>
+                                    <th>วันที่สอบผ่าน</th>
+                                    <th>คะแนน</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tblCertsAdmin">
+                                <tr><td colspan="6" class="text-center p-4">กำลังโหลด...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div> 
+      </div>
+    </div>
+  </div>
+  <!-- ==================== END MAIN APP SECTION ==================== -->
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- Login Modal -->
+  <div class="modal fade" id="loginModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title"><i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formLogin">
+            <div class="mb-3">
+              <label class="form-label">Username</label>
+              <div class="input-group">
+                <input type="text" class="form-control" id="login_user" required>
+                <span class="input-group-text"><i class="fas fa-user"></i></span>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="login_pass" required>
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePass('login_pass', this)">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Sign In</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Register Modal -->
+  <div class="modal fade" id="regModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header bg-success text-white">
+          <h5 class="modal-title"><i class="fas fa-user-plus"></i> ลงทะเบียน</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formReg">
+            <input type="hidden" id="edit_id_user" name="edit_id">
+            <div class="row mb-2">
+                <div class="col">
+                  <label class="form-label">สถานภาพ</label>
+                  <select class="form-select" id="reg_status" required>
+                    <option value="ผู้บริหาร">ผู้บริหาร</option>
+                    <option value="ครู">ครู</option>
+                    <option value="บุคลากรทางการศึกษา">บุคลากรทางการศึกษา</option>
+                    <option value="นักศึกษา">นักศึกษา</option>
+                    <option value="บุคคลทั่วไป">บุคคลทั่วไป</option>
+                  </select>
+                </div>
+                <div class="col">
+                  <label class="form-label">คำนำหน้า</label>
+                  <select class="form-select" id="reg_prefix" required>
+                    <option value="เด็กชาย">เด็กชาย</option>
+                    <option value="เด็กหญิง">เด็กหญิง</option>
+                    <option value="นาย">นาย</option>
+                    <option value="นาง">นาง</option>
+                    <option value="นางสาว">นางสาว</option>
+                    <option value="ว่าที่ร้อยตรี">ว่าที่ร้อยตรี</option>
+                    <option value="ว่าที่ร้อยตรีหญิง">ว่าที่ร้อยตรีหญิง</option>
+                  </select>
+                </div>
+              </div> 
+            <div class="row mb-2">
+              <div class="col">
+                <input type="text" class="form-control" id="reg_fname" placeholder="ชื่อ" required>
+              </div>
+              <div class="col">
+                <input type="text" class="form-control" id="reg_lname" placeholder="นามสกุล" required>
+              </div>
+            </div>
+            <div class="mb-2">
+              <input type="text" class="form-control" id="reg_user" placeholder="Username" required>
+            </div>
+            <div class="mb-3">
+              <div class="input-group">
+                <input type="password" class="form-control" id="reg_pass" placeholder="Password" required>
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePass('reg_pass', this)">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-success w-100">ลงทะเบียน</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Exam Modal -->
+  <div class="modal fade" id="examModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header bg-warning text-dark">
+          <h5 class="modal-title">สร้างข้อสอบ</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formExam">
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label">Unit</label>
+                <select class="form-select" name="exam_unit" id="examUnitSelect" required>
+                   <option value="" disabled selected>กำลังโหลดรายชื่อบทเรียน...</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">ประเภทข้อสอบ</label>
+                <select class="form-select" name="exam_cat" required>
+                  <option value="Pre-test">Pre-test</option>
+                  <option value="Post-test">Post-test</option>
+                  <option value="Final Test">Final Test</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">รูปแบบคำถาม</label>
+                <select class="form-select" id="examTypeSelector" name="exam_type" required>
+                    <option value="mcq">เลือกตอบ (MCQ)</option>
+                    <option value="tf">ถูก/ผิด (True/False)</option>
+                    <option value="short">เติมคำ (Short Answer)</option>
+                    <option value="dropdown">เติมคำในช่องว่าง (Dropdown)</option>
+                    <option value="matching">จับคู่ (Matching)</option>
+                </select>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">โจทย์คำถาม</label>
+              <textarea id="examSummernote" name="exam_question"></textarea>
+            </div>
+
+            <!-- Area สำหรับ MCQ -->
+            <div id="area_mcq" class="exam-option-group">
+                <label class="form-label">ตัวเลือก (เลือกข้อที่ถูกต้อง)</label>
+                <div class="input-group mb-2">
+                    <div class="input-group-text"><input class="form-check-input" type="radio" name="correct_idx" value="1"></div>
+                    <span class="input-group-text">ก.</span>
+                    <input type="text" class="form-control" name="choice_1" placeholder="ตัวเลือก ก">
+                </div>
+                <div class="input-group mb-2">
+                    <div class="input-group-text"><input class="form-check-input" type="radio" name="correct_idx" value="2"></div>
+                    <span class="input-group-text">ข.</span>
+                    <input type="text" class="form-control" name="choice_2" placeholder="ตัวเลือก ข">
+                </div>
+                <div class="input-group mb-2">
+                    <div class="input-group-text"><input class="form-check-input" type="radio" name="correct_idx" value="3"></div>
+                    <span class="input-group-text">ค.</span>
+                    <input type="text" class="form-control" name="choice_3" placeholder="ตัวเลือก ค">
+                </div>
+                <div class="input-group mb-2">
+                    <div class="input-group-text"><input class="form-check-input" type="radio" name="correct_idx" value="4"></div>
+                    <span class="input-group-text">ง.</span>
+                    <input type="text" class="form-control" name="choice_4" placeholder="ตัวเลือก ง">
+                </div>
+            </div>
+
+            <!-- Area สำหรับ True/False -->
+            <div id="area_tf" class="exam-option-group" style="display:none;">
+                <label class="form-label">เฉลย</label>
+                <select class="form-select" id="tfAnswerSelect">
+                    <option value="True">True (ถูก)</option>
+                    <option value="False">False (ผิด)</option>
+                </select>
+            </div>
+
+            <!-- Area สำหรับ Short Answer -->
+            <div id="area_short" class="exam-option-group" style="display:none;">
+                <label class="form-label">เฉลยคำตอบ</label>
+                <input type="text" class="form-control" id="shortAnswerInput" placeholder="พิมพ์คำตอบที่ถูกต้อง">
+            </div>
+
+            <!-- Area สำหรับ Dropdown -->
+            <div id="area_dropdown" class="exam-option-group" style="display:none;">
+               <div class="alert alert-info py-2 small">
+                   <i class="fas fa-info-circle"></i> 
+                   ในโจทย์ ให้พิมพ์ <code>___</code> (ขีดล่าง 3 ครั้ง) ตรงจุดที่ต้องการให้เลือกตอบ
+               </div>
+               <div class="row">
+                   <div class="col-md-6">
+                       <label class="form-label">ตัวลวง (ตัวเลือกที่ผิด)</label>
+                       <input type="text" class="form-control mb-2" id="dd_distractor_1" placeholder="ตัวเลือกผิด 1">
+                       <input type="text" class="form-control mb-2" id="dd_distractor_2" placeholder="ตัวเลือกผิด 2">
+                       <input type="text" class="form-control mb-2" id="dd_distractor_3" placeholder="ตัวเลือกผิด 3">
+                   </div>
+                   <div class="col-md-6">
+                       <label class="form-label fw-bold text-success">เฉลยคำตอบที่ถูกต้อง</label>
+                       <input type="text" class="form-control" id="ddAnswerInput" placeholder="คำตอบที่ถูกต้อง">
+                   </div>
+               </div>
+            </div>
+
+            <!-- Area สำหรับ Matching -->
+            <div id="area_matching" class="exam-option-group" style="display:none;">
+                <label class="form-label mb-2">จับคู่รายการ (ฝั่งซ้าย - ฝั่งขวา)</label>
+                <div class="table-responsive">
+                    <table class="table table-bordered bg-white">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="45%">สิ่งที่ต้องการถาม (ฝั่งซ้าย)</th>
+                                <th width="10%"><i class="fas fa-arrows-alt-h"></i></th>
+                                <th width="45%">คำตอบคู่กัน (ฝั่งขวา)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><input type="text" class="form-control matching-left" placeholder="เช่น Dog"></td>
+                                <td class="text-center text-muted">=</td>
+                                <td><input type="text" class="form-control matching-right" placeholder="เช่น สุนัข"></td>
+                            </tr>
+                            <tr>
+                                <td><input type="text" class="form-control matching-left" placeholder="เช่น Cat"></td>
+                                <td class="text-center text-muted">=</td>
+                                <td><input type="text" class="form-control matching-right" placeholder="เช่น แมว"></td>
+                            </tr>
+                            <tr>
+                                <td><input type="text" class="form-control matching-left" placeholder="เช่น Bird"></td>
+                                <td class="text-center text-muted">=</td>
+                                <td><input type="text" class="form-control matching-right" placeholder="เช่น นก"></td>
+                            </tr>
+                            <tr>
+                                <td><input type="text" class="form-control matching-left" placeholder="เช่น Pig"></td>
+                                <td class="text-center text-muted">=</td>
+                                <td><input type="text" class="form-control matching-right" placeholder="เช่น หมู"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <input type="hidden" name="exam_answer" id="finalAnswer">
+            <input type="hidden" name="exam_choices_raw" id="finalChoices">
+            <input type="hidden" id="edit_id_exam" name="edit_id">
+            <button type="submit" class="btn btn-primary w-100 mt-3">บันทึกข้อสอบ</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Modal -->
+  <div class="modal fade" id="contentModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header bg-info text-white">
+          <h5 class="modal-title">จัดการเนื้อหาบทเรียน</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formContent">
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label>บทที่ (Unit)</label>
+                <select class="form-select" name="content_unit" id="contentUnitSelect" required>
+                  <option value="" disabled selected>กำลังโหลดรายชื่อบทเรียน...</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label>ชื่อหัวข้อเรื่อง</label>
+                <input type="text" class="form-control" name="content_topic" required>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">รายละเอียดเนื้อหา (Text)</label>
+              <textarea id="summernote" name="content_desc"></textarea> 
+            </div>
+
+            <div class="mb-3">
+              <label>สื่อประกอบ</label>
+              <ul class="nav nav-tabs" id="mediaTab" role="tablist">
+                <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabUpload">อัปโหลดไฟล์</a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabLink">ลิงก์ภายนอก (YouTube/Drive)</a></li>
+              </ul>
+              <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                <div class="tab-pane fade show active" id="tabUpload">
+                  <input type="file" class="form-control" id="fileUpload">
+                  <div class="form-text">รองรับ PDF, รูปภาพ, Video (บันทึกลง Google Drive)</div>
+                </div>
+                <div class="tab-pane fade" id="tabLink">
+                  <input type="url" class="form-control" name="content_link" placeholder="https://...">
+                </div>
+              </div>
+            </div>
+            <input type="hidden" id="edit_id_lesson" name="edit_id">
+            <button type="submit" class="btn btn-primary w-100">บันทึกเนื้อหา</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cert Settings Modal -->
+  <div class="modal fade" id="certSettingsModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header bg-secondary text-white">
+          <h5 class="modal-title">ตั้งค่าเกียรติบัตร</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formCertSet">
+            <div class="mb-3">
+              <label>เลขที่เกียรติบัตรเริ่มต้น (Running Number)</label>
+              <input type="number" class="form-control" id="certStartNum" placeholder="เช่น 0001" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">บันทึก</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="footer mt-auto py-3 bg-dark text-white">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-6">
+                <p class="mb-1">
+                    <strong>พัฒนาโดย :</strong> 
+                    <a href="https://www.facebook.com/keng.loso.7" target="_blank" rel="noopener" class="text-warning text-decoration-none">
+                        นายบรรดิษฐ์ บรรดาสุข
+                    </a>
+                </p>
+                <p class="mb-0">
+                    <a href="https://www.facebook.com/nongsanuanschool" target="_blank" rel="noopener" class="text-white text-decoration-none">
+                        กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ
+                    </a>
+                </p>
+            </div>
+            <div class="col-md-6 text-md-end">
+                <p class="mb-1">
+                    <a href="https://www.facebook.com/nongsanuanschool" target="_blank" rel="noopener" class="text-warning text-decoration-none">
+                        โรงเรียนตักศิลาวิทยาลัย
+                    </a>
+                  </p>
+                <p class="mb-0">Taksilawittayalai</p>
+            </div>
+        </div>
+    </div>
+  </footer>
+
+  <!-- ==================== SCRIPTS ==================== -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.18/dist/summernote-lite.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+  
+  <?!= include('javascript'); ?>
+</body>
+</html>
